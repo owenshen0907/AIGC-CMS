@@ -3,7 +3,9 @@ package models
 
 // DatabaseInterface 定义数据库操作接口
 type DatabaseInterface interface {
-	InsertVectorStore(id, name, DisplayName, description, tags string) error
+	InsertVectorStore(id, name, DisplayName, description, tags, ModelOwner, creator_id string) error
+	GetKnowledgeBaseByID(id string) (*KnowledgeBase, error)
+	UpdateKnowledgeBase(id, displayName, description, tags string) error
 	// 添加其他需要的方法
 }
 
@@ -21,6 +23,7 @@ type RequestPayload struct {
 	Description    string      `json:"description"`
 	Tags           string      `json:"tags"`            // 标签以逗号分隔的字符串
 	VectorStoreID  string      `json:"vector_store_id"` // 新增字段，用于传递 vector_store_id
+	ModelOwner     string      `json:"model_owner"`     // 新增字段
 }
 
 // File 定义文件结构
@@ -89,4 +92,16 @@ type DifyResponse struct {
 		CompletionTokens int `json:"completion_tokens"`
 		TotalTokens      int `json:"total_tokens"`
 	} `json:"usage"`
+}
+
+// KnowledgeBase 定义知识库结构体
+type KnowledgeBase struct {
+	ID          string `json:"id"`
+	Name        string `json:"name"`         // 知识库标识
+	DisplayName string `json:"display_name"` // 知识库名称
+	Description string `json:"description"`
+	Tags        string `json:"tags"`
+	CreatedAt   string `json:"created_at"`
+	ModelOwner  string `json:"model_owner"` // 归属模型：stepfun，zhipu, moonshot, baichuan
+	CreatorID   string `json:"creator_id"`
 }

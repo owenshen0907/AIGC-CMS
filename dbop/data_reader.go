@@ -5,17 +5,21 @@ import (
 	"github.com/gin-gonic/gin"
 	"github.com/sirupsen/logrus"
 	"net/http"
+	"openapi-cms/models"
 )
 
 // KnowledgeBase 定义知识库结构体
-type KnowledgeBase struct {
-	ID          string `json:"id"`
-	Name        string `json:"name"`         // 知识库标识
-	DisplayName string `json:"display_name"` // 知识库名称
-	Description string `json:"description"`
-	Tags        string `json:"tags"`
-	CreatedAt   string `json:"created_at"`
-}
+//
+//	type KnowledgeBase struct {
+//		ID          string `json:"id"`
+//		Name        string `json:"name"`         // 知识库标识
+//		DisplayName string `json:"display_name"` // 知识库名称
+//		Description string `json:"description"`
+//		Tags        string `json:"tags"`
+//		CreatedAt   string `json:"created_at"`
+//		model_owner string `json:"model_owner"` //归属模型：stepfun，zhipu,moonshot,baichuan
+//		creator_id  string `json:"creator_id"`
+//	}
 
 // handleGetData 统一处理获取不同类型数据的请求
 func HandleGetData(db *Database) gin.HandlerFunc {
@@ -36,7 +40,7 @@ func HandleGetData(db *Database) gin.HandlerFunc {
 
 // getKnowledgeBases 获取知识库数据
 func getKnowledgeBases(c *gin.Context, db *Database) {
-	query := "SELECT id, name,COALESCE(display_name,''), COALESCE(description,''), COALESCE(tags,''), created_at FROM vector_stores"
+	query := "SELECT id, name,COALESCE(display_name,''), COALESCE(description,''), COALESCE(tags,''), created_at,model_owner,creator_id FROM vector_stores"
 	rows, err := db.Query(query)
 	if err != nil {
 		logrus.Printf("查询知识库失败: %v", err)
@@ -45,11 +49,11 @@ func getKnowledgeBases(c *gin.Context, db *Database) {
 	}
 	defer rows.Close()
 
-	var knowledgeBases []KnowledgeBase
+	var knowledgeBases []models.KnowledgeBase
 
 	for rows.Next() {
-		var kb KnowledgeBase
-		if err := rows.Scan(&kb.ID, &kb.Name, &kb.DisplayName, &kb.Description, &kb.Tags, &kb.CreatedAt); err != nil {
+		var kb models.KnowledgeBase
+		if err := rows.Scan(&kb.ID, &kb.Name, &kb.DisplayName, &kb.Description, &kb.Tags, &kb.CreatedAt, &kb.ModelOwner, &kb.CreatorID); err != nil {
 			logrus.Printf("扫描知识库数据失败: %v", err)
 			c.JSON(http.StatusInternalServerError, gin.H{"error": "Database error", "details": err.Error()})
 			return

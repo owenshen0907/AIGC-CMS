@@ -5,6 +5,7 @@ import (
 	"database/sql"
 	"fmt"
 	"log"
+	"openapi-cms/models"
 	"os"
 	"strings"
 
@@ -69,7 +70,7 @@ func NewDatabase() (*Database, error) {
 	}
 
 	// 预准备语句
-	insertStmt, err := database.db.Prepare("INSERT INTO vector_stores (id, name,display_name, description, tags) VALUES (?, ?,?, ?, ?)")
+	insertStmt, err := database.db.Prepare("INSERT INTO vector_stores (id, name,display_name, description, tags,model_owner,creator_id) VALUES (?, ?,?, ?, ?, ?, ?)")
 	if err != nil {
 		return nil, fmt.Errorf("failed to prepare insert statement: %w", err)
 	}
@@ -93,6 +94,8 @@ func (d *Database) createTables() error {
     display_name VARCHAR(255) NOT NULL,  -- 知识库名称
     description TEXT,
     tags VARCHAR(255),
+    model_owner VARCHAR(255) NOT NULL,   -- 归属模型
+    creator_id VARCHAR(255) NOT NULL,    -- 创建人ID
     created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
 )`
 	_, err := d.db.Exec(createVectorStoresTable)
@@ -117,12 +120,33 @@ func (d *Database) createTables() error {
 }
 
 // InsertVectorStore 插入 vector_store 记录
-func (d *Database) InsertVectorStore(id, name, display_name, description, tags string) error {
-	_, err := d.insertVectorStoreStmt.Exec(id, name, display_name, description, tags)
+func (d *Database) InsertVectorStore(id, name, display_name, description, tags, model_owner, creator_id string) error {
+	_, err := d.insertVectorStoreStmt.Exec(id, name, display_name, description, tags, model_owner, creator_id)
 	if err != nil {
 		return fmt.Errorf("failed to insert vector store: %w", err)
 	}
 	return nil
+}
+
+// GetKnowledgeBaseByID 获取指定 ID 的知识库记录
+func (d *Database) GetKnowledgeBaseByID(id string) (*models.KnowledgeBase, error) {
+	query := "SELECT id, name, display_name, description, tags, model_owner, created_at, creator_id FROM vector_stores WHERE id = ?"
+	row := d.db.QueryRow(query, id)
+	var kb models.KnowledgeBase
+	if err := row.Scan(&kb.ID, &kb.Name, &kb.DisplayName, &kb.Description, &kb.Tags, &kb.ModelOwner, &kb.CreatedAt, &kb.CreatorID); err != nil {
+		if err == sql.ErrNoRows {
+			return nil, nil // 未找到记录
+		}
+		return nil, err
+	}
+	return &kb, nil
+}
+
+// UpdateKnowledgeBase 更新指定 ID 的知识库记录
+func (d *Database) UpdateKnowledgeBase(id, displayName, description, tags string) error {
+	query := "UPDATE vector_stores SET display_name = ?, description = ?, tags = ? WHERE id = ?"
+	_, err := d.db.Exec(query, displayName, description, tags, id)
+	return err
 }
 
 // InsertFile 插入文件记录

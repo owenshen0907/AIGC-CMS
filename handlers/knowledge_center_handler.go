@@ -23,6 +23,7 @@ func HandleCreateVectorStore(c *gin.Context, db models.DatabaseInterface) {
 		DisplayName string `json:"display_name"` // 知识库名称
 		Description string `json:"description"`
 		Tags        string `json:"tags"`
+		ModelOwner  string `json:"model_owner"` //所属模型
 	}
 
 	// 绑定 JSON 请求体到结构体
@@ -50,6 +51,12 @@ func HandleCreateVectorStore(c *gin.Context, db models.DatabaseInterface) {
 	if len(payload.Description) > 500 {
 		logrus.WithField("description_length", len(payload.Description)).Error("Description too long")
 		c.JSON(http.StatusBadRequest, gin.H{"error": "Description is too long"})
+		return
+	}
+	// 验证 model_owner 为必填
+	if strings.TrimSpace(payload.ModelOwner) == "" {
+		logrus.Error("Model owner is required")
+		c.JSON(http.StatusBadRequest, gin.H{"error": "Model owner is required"})
 		return
 	}
 
@@ -133,7 +140,7 @@ func HandleCreateVectorStore(c *gin.Context, db models.DatabaseInterface) {
 	logrus.WithField("response", response).Info("StepFun API returned successfully")
 
 	// 使用预处理语句将 StepFun API 返回的 ID 存入数据库
-	if err := db.InsertVectorStore(response.ID, payload.Name, payload.DisplayName, payload.Description, payload.Tags); err != nil {
+	if err := db.InsertVectorStore(response.ID, payload.Name, payload.DisplayName, payload.Description, payload.Tags, payload.ModelOwner, "admin"); err != nil {
 		logrus.WithError(err).Error("Error inserting vector store into database")
 		c.JSON(http.StatusInternalServerError, gin.H{"error": "Database error"})
 		return
@@ -146,5 +153,81 @@ func HandleCreateVectorStore(c *gin.Context, db models.DatabaseInterface) {
 		"display_name": payload.DisplayName,
 		"description":  payload.Description,
 		"tags":         payload.Tags,
+		"model_owner":  payload.ModelOwner,
+	})
+}
+
+// HandleUpdateKnowledgeBase 处理更新知识库的请求
+func HandleUpdateKnowledgeBase(c *gin.Context, db models.DatabaseInterface) {
+	// 从 URL 参数获取知识库 ID
+	id := c.Param("id")
+	if id == "" {
+		logrus.Error("Missing knowledge base ID in URL")
+		c.JSON(http.StatusBadRequest, gin.H{"error": "Knowledge base ID is required"})
+		return
+	}
+
+	var payload struct {
+		DisplayName string `json:"display_name"` // 知识库名称
+		Description string `json:"description"`
+		Tags        string `json:"tags"`
+	}
+
+	// 绑定 JSON 请求体到结构体
+	if err := c.ShouldBindJSON(&payload); err != nil {
+		logrus.WithError(err).Error("Error binding JSON")
+		c.JSON(http.StatusBadRequest, gin.H{"error": "Invalid request payload"})
+		return
+	}
+
+	// 验证 display_name 为必填
+	if strings.TrimSpace(payload.DisplayName) == "" {
+		logrus.Error("Display name is required")
+		c.JSON(http.StatusBadRequest, gin.H{"error": "Display name is required"})
+		return
+	}
+
+	// 验证 description 和 tags 的长度
+	if len(payload.Description) > 500 {
+		logrus.WithField("description_length", len(payload.Description)).Error("Description too long")
+		c.JSON(http.StatusBadRequest, gin.H{"error": "Description is too long"})
+		return
+	}
+
+	if len(payload.Tags) > 200 {
+		logrus.WithField("tags_length", len(payload.Tags)).Error("Tags too long")
+		c.JSON(http.StatusBadRequest, gin.H{"error": "Tags are too long"})
+		return
+	}
+
+	// 获取现有的知识库记录
+	existingKB, err := db.GetKnowledgeBaseByID(id)
+	if err != nil {
+		logrus.WithError(err).Error("Error fetching knowledge base from database")
+		c.JSON(http.StatusInternalServerError, gin.H{"error": "Database error"})
+		return
+	}
+
+	if existingKB == nil {
+		logrus.WithField("id", id).Error("Knowledge base not found")
+		c.JSON(http.StatusNotFound, gin.H{"error": "Knowledge base not found"})
+		return
+	}
+
+	// 更新数据库中的记录
+	if err := db.UpdateKnowledgeBase(id, payload.DisplayName, payload.Description, payload.Tags); err != nil {
+		logrus.WithError(err).Error("Error updating knowledge base in database")
+		c.JSON(http.StatusInternalServerError, gin.H{"error": "Database error"})
+		return
+	}
+
+	// 返回成功响应
+	c.JSON(http.StatusOK, gin.H{
+		"id":           existingKB.ID,
+		"name":         existingKB.Name, // 保持原有的 name（只读）
+		"display_name": payload.DisplayName,
+		"description":  payload.Description,
+		"tags":         payload.Tags,
+		"model_owner":  existingKB.ModelOwner, // 保持原有的 model_owner
 	})
 }
