@@ -3,6 +3,9 @@ package main
 
 import (
 	"log"
+	"openapi-cms/dbop"
+	"openapi-cms/handlers"
+	"openapi-cms/tool"
 	"os"
 
 	"github.com/gin-contrib/cors"
@@ -28,7 +31,7 @@ func main() {
 	}
 
 	// 初始化数据库
-	db, err := NewDatabase()
+	db, err := dbop.NewDatabase()
 	if err != nil {
 		logrus.Fatalf("Failed to initialize database: %v", err)
 	}
@@ -49,20 +52,20 @@ func main() {
 	// 定义路由并注入依赖
 	api := router.Group("/api")
 	{
-		// 创建向量存储，使用闭包传递 db
+		// 创建向量存储，使用闭包传递 dbop
 		api.POST("/create-vector-store", func(c *gin.Context) {
-			handleCreateVectorStore(c, db)
+			handlers.HandleCreateVectorStore(c, db)
 		})
 
 		// 聊天消息处理器
-		api.POST("/chat-messages/dify", handleChatMessagesDify)
-		api.POST("/chat-messages/stepfun", handleChatMessagesStepFun)
+		api.POST("/chat-messages/dify", handlers.HandleChatMessagesDify)
+		api.POST("/chat-messages/stepfun", handlers.HandleChatMessagesStepFun)
 
-		// 获取数据，使用闭包传递 db
-		api.GET("/get-data", handleGetData(db))
-		// 新增上传文件路由，使用闭包传递 db
+		// 获取数据，使用闭包传递 dbop
+		api.GET("/get-data", dbop.HandleGetData(db))
+		// 新增上传文件路由，使用闭包传递 dbop
 		api.POST("/knowledge-upload-file", func(c *gin.Context) {
-			handleUploadFile(c, db)
+			tool.HandleUploadFile(c, db)
 		})
 	}
 

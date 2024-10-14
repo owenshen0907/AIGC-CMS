@@ -1,9 +1,10 @@
 // database.go
-package main
+package dbop
 
 import (
 	"database/sql"
 	"fmt"
+	"log"
 	"os"
 	"strings"
 
@@ -131,6 +132,15 @@ func (d *Database) InsertFile(id, vectorStoreID string, usageBytes int) error {
 		return fmt.Errorf("failed to insert file: %w", err)
 	}
 	return nil
+}
+
+// Query 封装查询操作
+func (db *Database) Query(query string, args ...interface{}) (*sql.Rows, error) {
+	if db.db == nil {
+		log.Println("数据库连接未初始化")
+		return nil, sql.ErrConnDone
+	}
+	return db.db.Query(query, args...)
 }
 
 // Close 关闭数据库连接

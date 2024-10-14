@@ -1,4 +1,4 @@
-package main
+package handlers
 
 import (
 	"bufio"
@@ -6,6 +6,7 @@ import (
 	"encoding/json"
 	"fmt"
 	"net/http"
+	"openapi-cms/models"
 	"os"
 	"strings"
 
@@ -16,8 +17,8 @@ import (
 // 其他结构体定义保持不变，集中在 models.go 中
 
 // handleChatMessagesStepFun 处理 StepFun 聊天消息的请求
-func handleChatMessagesStepFun(c *gin.Context) {
-	var payload RequestPayload
+func HandleChatMessagesStepFun(c *gin.Context) {
+	var payload models.RequestPayload
 	if err := c.ShouldBindJSON(&payload); err != nil {
 		logrus.Printf("Error binding JSON: %v", err)
 		c.JSON(http.StatusBadRequest, gin.H{"error": "Invalid request payload"})
@@ -41,26 +42,57 @@ func handleChatMessagesStepFun(c *gin.Context) {
 	}
 
 	// 构建 StepFunRequestPayload
-	stepFunRequest := StepFunRequestPayload{
-		Model:  "step-2-16k-nightly", // 根据需要选择模型
+	stepFunRequest := models.StepFunRequestPayload{
+		Model:  "step-2-16k", // 根据需要选择模型
 		Stream: true,
 	}
 
 	// 系统消息
-	systemMessage := StepFunMessage{
+	systemMessage := models.StepFunMessage{
 		Role:    "system",
 		Content: "你是由阶跃星辰为微信对话框提供的AI图像分析师，善于图片分析，可以分析图片中的文字，地址，建筑，人物，动物，食物，植物等结构清晰的物品。在输出结果的时候请将内容排版的美观，使其在微信中显示时易于阅读。请使用适当的换行和空行，不要包含 `\\n` 等符号。示例格式：",
 	}
 
 	// 用户消息
-	userMessage := StepFunMessage{
+	userMessage := models.StepFunMessage{
 		Role:    "user",
 		Content: payload.Query,
 	}
 
 	// 将消息添加到请求中
-	stepFunRequest.Messages = []StepFunMessage{systemMessage, userMessage}
+	stepFunRequest.Messages = []models.StepFunMessage{systemMessage, userMessage}
 
+	// 构建工具列表
+	tools := []models.StepFunTool{}
+
+	// 添加 web_search 工具
+	webSearchTool := models.StepFunTool{
+		Type: "web_search",
+		Function: models.StepFunToolFunction{
+			Description: "这个工具可以用来搜索互联网的信息",
+		},
+	}
+	tools = append(tools, webSearchTool)
+
+	// 如果前端传递了 vector_store_id，则添加 retrieval 工具
+	if strings.TrimSpace(payload.VectorStoreID) != "" {
+		retrievalTool := models.StepFunTool{
+			Type: "retrieval",
+			Function: models.StepFunToolFunction{
+				Description: payload.Description,
+				Options: map[string]string{
+					"vector_store_id": payload.VectorStoreID, // 从前端传递的 vector_store_id
+					"prompt_template": "从文档 {{knowledge}} 中找到问题 {{query}} 的答案。根据文档内容中的语句找到答案，如果文档中没用答案则告诉用户找不到相关信息；",
+				},
+			},
+		}
+		tools = append(tools, retrievalTool)
+	} else {
+		logrus.Println("vector_store_id not provided, skipping retrieval tool")
+	}
+
+	// 将工具添加到请求中
+	stepFunRequest.Tools = tools
 	// 将请求体编码为 JSON
 	stepFunReqBodyBytes, err := json.Marshal(stepFunRequest)
 	if err != nil {
@@ -70,8 +102,8 @@ func handleChatMessagesStepFun(c *gin.Context) {
 	}
 
 	// 打印发送给 StepFun API 的请求报文
-	logrus.Printf("StepFun API 请求报文: %s", string(stepFunReqBodyBytes))
-
+	//logrus.Printf("StepFun API 请求报文: %s", stepFunReqBodyBytes)
+	fmt.Printf("StepFun API 请求报文: %s", stepFunReqBodyBytes)
 	// 创建向 StepFun API 发送的 HTTP 请求
 	stepFunReq, err := http.NewRequest("POST", "https://api.stepfun.com/v1/chat/completions", bytes.NewBuffer(stepFunReqBodyBytes))
 	if err != nil {
@@ -121,7 +153,7 @@ func handleChatMessagesStepFun(c *gin.Context) {
 			continue // 跳过空行
 		}
 		// 打印返回的报文
-		logrus.Printf("StepFun 返回报文: %s", line)
+		//logrus.Printf("StepFun 返回报文: %s", line)
 		// 发送数据到前端，确保 JSON 字符串未被转义
 		fmt.Fprintf(c.Writer, "%s\n\n", line)
 		// 刷新缓冲区
@@ -135,4 +167,24 @@ func handleChatMessagesStepFun(c *gin.Context) {
 	}
 
 	c.Status(http.StatusOK)
+}
+
+// sendStepFunRequest 通用的 HTTP 请求发送函数
+func SendStepFunRequest(method, url string, headers map[string]string, body *bytes.Buffer) (*http.Response, error) {
+	client := &http.Client{}
+	req, err := http.NewRequest(method, url, body)
+	if err != nil {
+		return nil, fmt.Errorf("failed to create request: %w", err)
+	}
+
+	for key, value := range headers {
+		req.Header.Set(key, value)
+	}
+
+	resp, err := client.Do(req)
+	if err != nil {
+		return nil, fmt.Errorf("failed to send request: %w", err)
+	}
+
+	return resp, nil
 }

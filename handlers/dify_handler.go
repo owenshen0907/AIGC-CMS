@@ -1,5 +1,5 @@
 // dify_handler.go
-package main
+package handlers
 
 import (
 	"bufio"
@@ -8,6 +8,7 @@ import (
 	"fmt"
 	"io"
 	"net/http"
+	"openapi-cms/models"
 	"os"
 
 	"github.com/gin-gonic/gin"
@@ -15,8 +16,8 @@ import (
 )
 
 // handleChatMessagesDify 处理 Dify 聊天消息的请求
-func handleChatMessagesDify(c *gin.Context) {
-	var payload RequestPayload
+func HandleChatMessagesDify(c *gin.Context) {
+	var payload models.RequestPayload
 	if err := c.ShouldBindJSON(&payload); err != nil {
 		logrus.Printf("Error binding JSON: %v", err)
 		c.JSON(http.StatusBadRequest, gin.H{"error": "Invalid request payload"})
@@ -86,7 +87,7 @@ func handleChatMessagesDify(c *gin.Context) {
 		line := scanner.Text()
 		if len(line) > 5 && line[:5] == "data:" {
 			line = line[5:]
-			var difyResponse DifyResponse
+			var difyResponse models.DifyResponse
 			err = json.Unmarshal([]byte(line), &difyResponse)
 			if err != nil {
 				logrus.Printf("Error decoding Dify response line: %v", err)
@@ -151,7 +152,7 @@ func handleChatMessagesDify(c *gin.Context) {
 			logrus.Printf("Dify 返回前端的 StepFun 风格报文: %v", response)
 
 			// 转发每一行到前端
-			fmt.Fprintf(c.Writer, "data: %s\n\n", toJSONString(response))
+			//fmt.Fprintf(c.Writer, "data: %s\n\n", main.toJSONString(response))
 			// 刷新缓冲区
 			c.Writer.Flush()
 		}

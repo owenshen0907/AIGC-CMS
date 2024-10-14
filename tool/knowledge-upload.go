@@ -1,5 +1,5 @@
 // upload.go
-package main
+package tool
 
 import (
 	"bytes"
@@ -8,6 +8,7 @@ import (
 	"io"
 	"mime/multipart"
 	"net/http"
+	"openapi-cms/dbop"
 	"os"
 
 	"github.com/gin-gonic/gin"
@@ -22,7 +23,7 @@ type UploadResponse struct {
 }
 
 // handleUploadFile 处理上传文件的请求
-func handleUploadFile(c *gin.Context, db *Database) {
+func HandleUploadFile(c *gin.Context, db *dbop.Database) {
 	// 从表单中获取 vector_store_id
 	vectorStoreID := c.PostForm("vector_store_id")
 	if vectorStoreID == "" {

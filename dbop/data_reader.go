@@ -1,11 +1,10 @@
 // data_reader.go
-package main
+package dbop
 
 import (
-	"net/http"
-
 	"github.com/gin-gonic/gin"
 	"github.com/sirupsen/logrus"
+	"net/http"
 )
 
 // KnowledgeBase 定义知识库结构体
@@ -19,7 +18,7 @@ type KnowledgeBase struct {
 }
 
 // handleGetData 统一处理获取不同类型数据的请求
-func handleGetData(db *Database) gin.HandlerFunc {
+func HandleGetData(db *Database) gin.HandlerFunc {
 	return func(c *gin.Context) {
 		// 从查询参数获取数据类型
 		dataType := c.Query("type")
@@ -38,7 +37,7 @@ func handleGetData(db *Database) gin.HandlerFunc {
 // getKnowledgeBases 获取知识库数据
 func getKnowledgeBases(c *gin.Context, db *Database) {
 	query := "SELECT id, name,COALESCE(display_name,''), COALESCE(description,''), COALESCE(tags,''), created_at FROM vector_stores"
-	rows, err := db.db.Query(query)
+	rows, err := db.Query(query)
 	if err != nil {
 		logrus.Printf("查询知识库失败: %v", err)
 		c.JSON(http.StatusInternalServerError, gin.H{"error": "Database error", "details": err.Error()})

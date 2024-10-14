@@ -1,5 +1,5 @@
 // knowledge_center_handler.go
-package main
+package handlers
 
 import (
 	"bytes"
@@ -7,6 +7,7 @@ import (
 	"fmt"
 	"io"
 	"net/http"
+	"openapi-cms/models"
 	"os"
 	"regexp"
 	"strings"
@@ -16,7 +17,7 @@ import (
 )
 
 // handleCreateVectorStore 处理创建向量存储的请求
-func handleCreateVectorStore(c *gin.Context, db DatabaseInterface) {
+func HandleCreateVectorStore(c *gin.Context, db models.DatabaseInterface) {
 	var payload struct {
 		Name        string `json:"name"`         // 知识库标识
 		DisplayName string `json:"display_name"` // 知识库名称
@@ -76,7 +77,7 @@ func handleCreateVectorStore(c *gin.Context, db DatabaseInterface) {
 	}
 
 	// 发送请求给 StepFun API
-	resp, err := sendStepFunRequest("POST", "https://api.stepfun.com/v1/vector_stores", headers, bytes.NewBuffer(jsonData))
+	resp, err := SendStepFunRequest("POST", "https://api.stepfun.com/v1/vector_stores", headers, bytes.NewBuffer(jsonData))
 	if err != nil {
 		logrus.WithError(err).Error("Error sending request to StepFun API")
 		c.JSON(http.StatusInternalServerError, gin.H{"error": "Failed to communicate with StepFun API"})
@@ -122,7 +123,7 @@ func handleCreateVectorStore(c *gin.Context, db DatabaseInterface) {
 	}
 
 	// 解析成功的响应
-	var response StepFunResponse
+	var response models.StepFunResponse
 	if err := json.Unmarshal(bodyBytes, &response); err != nil {
 		logrus.WithError(err).Error("Error unmarshaling StepFun API response")
 		c.JSON(http.StatusInternalServerError, gin.H{"error": "Failed to parse StepFun API response"})

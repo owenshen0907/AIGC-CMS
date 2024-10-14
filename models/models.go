@@ -1,11 +1,5 @@
 // models.go
-package main
-
-import (
-	"bytes"
-	"fmt"
-	"net/http"
-)
+package models
 
 // DatabaseInterface 定义数据库操作接口
 type DatabaseInterface interface {
@@ -25,7 +19,8 @@ type RequestPayload struct {
 	Files          []File      `json:"files,omitempty"`
 	Name           string      `json:"name"`
 	Description    string      `json:"description"`
-	Tags           string      `json:"tags"` // 标签以逗号分隔的字符串
+	Tags           string      `json:"tags"`            // 标签以逗号分隔的字符串
+	VectorStoreID  string      `json:"vector_store_id"` // 新增字段，用于传递 vector_store_id
 }
 
 // File 定义文件结构
@@ -54,11 +49,25 @@ type StepFunMessage struct {
 	Content interface{} `json:"content"` // 对于 "system" 是字符串，对于 "user" 是 []StepFunMessageContent
 }
 
+// StepFunToolFunction 定义工具的功能描述及可选参数
+type StepFunToolFunction struct {
+	Description    string            `json:"description"`
+	Options        map[string]string `json:"options,omitempty"` // 可选项是map类型，存储工具的配置参数
+	PromptTemplate string            `json:"prompt_template,omitempty"`
+}
+
+// StepFunTool 定义工具结构
+type StepFunTool struct {
+	Type     string              `json:"type"`     // 工具类型
+	Function StepFunToolFunction `json:"function"` // 工具的功能
+}
+
 // StepFunRequestPayload 定义发送到 StepFun API 的请求结构
 type StepFunRequestPayload struct {
 	Model    string           `json:"model"`  // "step-1v-8k"
 	Stream   bool             `json:"stream"` // true
 	Messages []StepFunMessage `json:"messages"`
+	Tools    []StepFunTool    `json:"tools,omitempty"` // 新增字段，用于存储工具
 }
 
 // StepFunResponse 定义 StepFun API 的响应结构
@@ -80,24 +89,4 @@ type DifyResponse struct {
 		CompletionTokens int `json:"completion_tokens"`
 		TotalTokens      int `json:"total_tokens"`
 	} `json:"usage"`
-}
-
-// sendStepFunRequest 通用的 HTTP 请求发送函数
-func sendStepFunRequest(method, url string, headers map[string]string, body *bytes.Buffer) (*http.Response, error) {
-	client := &http.Client{}
-	req, err := http.NewRequest(method, url, body)
-	if err != nil {
-		return nil, fmt.Errorf("failed to create request: %w", err)
-	}
-
-	for key, value := range headers {
-		req.Header.Set(key, value)
-	}
-
-	resp, err := client.Do(req)
-	if err != nil {
-		return nil, fmt.Errorf("failed to send request: %w", err)
-	}
-
-	return resp, nil
 }
