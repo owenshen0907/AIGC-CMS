@@ -67,8 +67,10 @@ func main() {
 
 		// 获取数据，使用闭包传递 dbop
 		api.GET("/get-data", dbop.HandleGetData(db))
+		// 新增路由，获取某个知识库下的文件信息
+		api.GET("/knowledge-bases/:id/files", dbop.GetFilesByKnowledgeBaseID(db))
 		// 新增上传文件路由，使用闭包传递 dbop
-		api.POST("/knowledge-upload-file", func(c *gin.Context) {
+		api.POST("/knowledge-uploads-file", func(c *gin.Context) {
 			tool.HandleUploadFile(c, db)
 		})
 	}

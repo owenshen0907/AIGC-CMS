@@ -76,7 +76,7 @@ func NewDatabase() (*Database, error) {
 	}
 	database.insertVectorStoreStmt = insertStmt
 	// 准备插入文件的语句
-	fileInsertStmt, err := database.db.Prepare("INSERT INTO files (id, vector_store_id, usage_bytes) VALUES (?, ?, ?)")
+	fileInsertStmt, err := database.db.Prepare("INSERT INTO files (id, vector_store_id, usage_bytes, file_id) VALUES (?, ?, ?, ?)")
 	if err != nil {
 		return nil, fmt.Errorf("failed to prepare file insert statement: %w", err)
 	}
@@ -103,13 +103,30 @@ func (d *Database) createTables() error {
 		return fmt.Errorf("failed to create table vector_stores: %w", err)
 	}
 
+	createUploadFilesTable := `
+	CREATE TABLE IF NOT EXISTS uploaded_files (
+		file_id VARCHAR(255) PRIMARY KEY,     -- 文件ID
+		file_name VARCHAR(255) NOT NULL,      -- 文件名
+		file_path VARCHAR(512) NOT NULL,      -- 存储路径
+		file_type VARCHAR(50) NOT NULL,       -- 文件类型
+		file_description TEXT,                -- 文件描述
+		upload_time TIMESTAMP DEFAULT CURRENT_TIMESTAMP -- 上传时间
+	)`
+	_, err = d.db.Exec(createUploadFilesTable)
+	if err != nil {
+		return fmt.Errorf("failed to create table files: %w", err)
+	}
+
 	createFilesTable := `
 	CREATE TABLE IF NOT EXISTS files (
-		id VARCHAR(255) PRIMARY KEY,
-		vector_store_id VARCHAR(255) NOT NULL,
-		usage_bytes INT NOT NULL,
-		created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
-		FOREIGN KEY (vector_store_id) REFERENCES vector_stores(id) ON DELETE CASCADE
+		id VARCHAR(255) PRIMARY KEY,           -- 主键ID
+		vector_store_id VARCHAR(255) NOT NULL, -- 向量存储ID
+		usage_bytes INT NOT NULL,              -- 使用的字节数
+		created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP, -- 创建时间
+		file_id VARCHAR(255),                  -- 与文件关联的ID
+		status VARCHAR(50) NOT NULL DEFAULT 'processing', -- 状态字段：处理中的状态
+		FOREIGN KEY (file_id) REFERENCES uploaded_files(file_id) ON DELETE SET NULL, -- 外键关联 uploaded_files
+		FOREIGN KEY (vector_store_id) REFERENCES vector_stores(id) ON DELETE CASCADE -- 外键关联 vector_stores
 	)`
 	_, err = d.db.Exec(createFilesTable)
 	if err != nil {
@@ -149,9 +166,30 @@ func (d *Database) UpdateKnowledgeBase(id, displayName, description, tags string
 	return err
 }
 
-// InsertFile 插入文件记录
-func (d *Database) InsertFile(id, vectorStoreID string, usageBytes int) error {
-	_, err := d.insertFileStmt.Exec(id, vectorStoreID, usageBytes)
+// InsertUploadedFile 插入 uploaded_files 记录
+func (d *Database) InsertUploadedFile(fileID, fileName, filePath, fileType string) error {
+	query := "INSERT INTO uploaded_files (file_id, file_name, file_path, file_type) VALUES (?, ?, ?, ?)"
+	_, err := d.db.Exec(query, fileID, fileName, filePath, fileType)
+	if err != nil {
+		return fmt.Errorf("failed to insert uploaded file: %w", err)
+	}
+	return nil
+}
+
+// UpdateUploadedFileStatus 更新文件状态
+func (d *Database) UpdateUploadedFileStatus(fileID, status string) error {
+	query := "UPDATE uploaded_files SET status = ? WHERE file_id = ?"
+	_, err := d.db.Exec(query, status, fileID)
+	if err != nil {
+		return fmt.Errorf("failed to update file status: %w", err)
+	}
+	return nil
+}
+
+// InsertFile 插入文件记录，增加 file_id 作为外键
+func (d *Database) InsertFile(id, vectorStoreID string, usageBytes int, fileID string) error {
+	query := "INSERT INTO files (id, vector_store_id, usage_bytes, file_id) VALUES (?, ?, ?, ?)"
+	_, err := d.insertFileStmt.Exec(query, id, vectorStoreID, usageBytes, fileID)
 	if err != nil {
 		return fmt.Errorf("failed to insert file: %w", err)
 	}

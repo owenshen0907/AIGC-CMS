@@ -1,4 +1,4 @@
-// upload.go
+// uploads.go
 package tool
 
 import (
@@ -12,6 +12,7 @@ import (
 	"os"
 
 	"github.com/gin-gonic/gin"
+	"github.com/google/uuid"
 	"github.com/sirupsen/logrus"
 )
 
@@ -39,36 +40,73 @@ func HandleUploadFile(c *gin.Context, db *dbop.Database) {
 		return
 	}
 	defer file.Close()
-
-	// 调用外部 API 上传文件
-	uploadResp, err := uploadFileToStepFun(vectorStoreID, file, header.Filename)
+	// 保存文件到服务器本地
+	filePath := fmt.Sprintf("./uploads/%s", header.Filename) // 假设存储路径为 ./uploads/
+	out, err := os.Create(filePath)
 	if err != nil {
-		logrus.Errorf("Error uploading file to StepFun: %v", err)
-		c.JSON(http.StatusInternalServerError, gin.H{"error": "Failed to upload file"})
+		logrus.Errorf("Error saving the file: %v", err)
+		c.JSON(http.StatusInternalServerError, gin.H{"error": "Failed to save file"})
 		return
 	}
+	defer out.Close()
 
-	// 将响应数据存储到数据库
-	err = db.InsertFile(uploadResp.ID, uploadResp.VectorStoreID, uploadResp.UsageBytes)
+	_, err = io.Copy(out, file)
 	if err != nil {
-		logrus.Errorf("Error inserting file record to database: %v", err)
+		logrus.Errorf("Error writing the file to disk: %v", err)
+		c.JSON(http.StatusInternalServerError, gin.H{"error": "Failed to write file"})
+		return
+	}
+	// 将文件信息存储到数据库中的 uploaded_files 表
+	fileID := uuid.New().String()
+	fileType := header.Header.Get("Content-Type")
+	err = db.InsertUploadedFile(fileID, header.Filename, filePath, fileType)
+	if err != nil {
+		logrus.Errorf("Error inserting uploaded file record to database: %v", err)
 		c.JSON(http.StatusInternalServerError, gin.H{"error": "Failed to store file information"})
 		return
 	}
 
+	// 异步调用外部 API 上传文件，并记录 API 返回的文件信息
+	go func() {
+		uploadResp, err := uploadFileToStepFun(vectorStoreID, filePath, header.Filename)
+		if err != nil {
+			logrus.Errorf("Error uploading file to StepFun: %v", err)
+			return
+		}
+
+		// 更新数据库中的 files 表，存储 API 返回的文件信息，增加 fileID
+		err = db.InsertFile(uploadResp.ID, vectorStoreID, uploadResp.UsageBytes, fileID)
+		if err != nil {
+			logrus.Errorf("Error inserting file record to database: %v", err)
+			return
+		}
+
+		// 更新上传文件的状态为 "completed"
+		err = db.UpdateUploadedFileStatus(fileID, "completed")
+		if err != nil {
+			logrus.Errorf("Error updating uploaded file status: %v", err)
+		}
+	}()
+
 	// 返回成功响应
 	c.JSON(http.StatusOK, gin.H{
-		"id":              uploadResp.ID,
-		"usage_bytes":     uploadResp.UsageBytes,
-		"vector_store_id": uploadResp.VectorStoreID,
+		"file_id":   fileID,
+		"status":    "File saved successfully, will be uploaded to StepFun",
+		"file_path": filePath,
 	})
 }
 
 // uploadFileToStepFun 调用外部 StepFun API 上传文件
-func uploadFileToStepFun(vectorStoreID string, file multipart.File, filename string) (*UploadResponse, error) {
+func uploadFileToStepFun(vectorStoreID string, filePath, filename string) (*UploadResponse, error) {
 	// StepFun API URL
 	url := fmt.Sprintf("https://api.stepfun.com/v1/vector_stores/%s/files", vectorStoreID)
 
+	// 打开本地文件
+	file, err := os.Open(filePath)
+	if err != nil {
+		return nil, fmt.Errorf("failed to open file: %w", err)
+	}
+	defer file.Close()
 	// 创建缓冲区和 multipart 写入器
 	var requestBody bytes.Buffer
 	writer := multipart.NewWriter(&requestBody)
