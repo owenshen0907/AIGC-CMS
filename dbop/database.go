@@ -90,7 +90,7 @@ func (d *Database) createTables() error {
 	createVectorStoresTable := `
 	CREATE TABLE IF NOT EXISTS vector_stores (
     id VARCHAR(255) PRIMARY KEY,
-    name VARCHAR(255) NOT NULL,          -- 知识库标识
+    name VARCHAR(255) NOT NULL UNIQUE,          -- 知识库标识，用于唯一标识知识库
     display_name VARCHAR(255) NOT NULL,  -- 知识库名称
     description TEXT,
     tags VARCHAR(255),
@@ -105,12 +105,14 @@ func (d *Database) createTables() error {
 
 	createUploadFilesTable := `
 	CREATE TABLE IF NOT EXISTS uploaded_files (
-		file_id VARCHAR(255) PRIMARY KEY,     -- 文件ID
-		file_name VARCHAR(255) NOT NULL,      -- 文件名
-		file_path VARCHAR(512) NOT NULL,      -- 存储路径
-		file_type VARCHAR(50) NOT NULL,       -- 文件类型
-		file_description TEXT,                -- 文件描述
-		upload_time TIMESTAMP DEFAULT CURRENT_TIMESTAMP -- 上传时间
+		file_id VARCHAR(255) PRIMARY KEY,           -- 文件ID
+		file_name VARCHAR(255) NOT NULL,            -- 文件名
+		file_path VARCHAR(512) NOT NULL,            -- 存储路径
+		file_type VARCHAR(50) NOT NULL,             -- 文件类型
+		file_description TEXT,                      -- 文件描述
+		vector_store_id VARCHAR(255) NOT NULL,      -- 知识库ID
+		upload_time TIMESTAMP DEFAULT CURRENT_TIMESTAMP, -- 上传时间
+		FOREIGN KEY (vector_store_id) REFERENCES knowledge_bases(id) -- 假设关联到 knowledge_bases 表
 	)`
 	_, err = d.db.Exec(createUploadFilesTable)
 	if err != nil {
@@ -159,17 +161,48 @@ func (d *Database) GetKnowledgeBaseByID(id string) (*models.KnowledgeBase, error
 	return &kb, nil
 }
 
-// UpdateKnowledgeBase 更新指定 ID 的知识库记录
-func (d *Database) UpdateKnowledgeBase(id, displayName, description, tags string) error {
-	query := "UPDATE vector_stores SET display_name = ?, description = ?, tags = ? WHERE id = ?"
-	_, err := d.db.Exec(query, displayName, description, tags, id)
+// GetKnowledgeBaseByName 获取指定 name 的知识库记录
+func (d *Database) GetKnowledgeBaseByName(name string) (*models.KnowledgeBase, error) {
+	query := "SELECT id, name, display_name, description, tags, model_owner, created_at, creator_id FROM vector_stores WHERE name = ?"
+	row := d.db.QueryRow(query, name)
+	var kb models.KnowledgeBase
+	if err := row.Scan(&kb.ID, &kb.Name, &kb.DisplayName, &kb.Description, &kb.Tags, &kb.ModelOwner, &kb.CreatedAt, &kb.CreatorID); err != nil {
+		if err == sql.ErrNoRows {
+			return nil, nil // 未找到记录
+		}
+		return nil, err
+	}
+	return &kb, nil
+}
+
+// UpdateKnowledgeBaseByName 当知识库name一样时，表面是前端再重新发起请求，将有个可能更新的内容进行调整
+func (d *Database) UpdateKnowledgeBaseByName(name, displayName, description, tags, modelOwner string) error {
+	query := "UPDATE vector_stores SET display_name = ?, description = ?, tags = ?, model_owner = ? WHERE name = ?"
+	_, err := d.db.Exec(query, displayName, description, tags, modelOwner, name)
+	if err != nil {
+		return fmt.Errorf("failed to update knowledge base by name: %w", err)
+	}
+	return nil
+}
+
+// UpdateKnowledgeBaseIDByName 更新指定 name 的知识库记录
+func (d *Database) UpdateKnowledgeBaseIDByName(name string, id string) error {
+	query := "UPDATE vector_stores SET id = ? WHERE name = ?"
+	_, err := d.db.Exec(query, id, name)
+	return err
+}
+
+// UpdateKnowledgeBase 更新指定 name 的知识库记录
+func (d *Database) UpdateKnowledgeBase(name, displayName, description, tags string) error {
+	query := "UPDATE vector_stores SET display_name = ?, description = ?, tags = ? WHERE name = ?"
+	_, err := d.db.Exec(query, displayName, description, tags, name)
 	return err
 }
 
 // InsertUploadedFile 插入 uploaded_files 记录
-func (d *Database) InsertUploadedFile(fileID, fileName, filePath, fileType string) error {
-	query := "INSERT INTO uploaded_files (file_id, file_name, file_path, file_type) VALUES (?, ?, ?, ?)"
-	_, err := d.db.Exec(query, fileID, fileName, filePath, fileType)
+func (d *Database) InsertUploadedFile(fileID, fileName, filePath, fileType, vectorStoreID, fileDescription string) error {
+	query := "INSERT INTO uploaded_files (file_id, file_name, file_path, file_type,vector_store_id,file_description) VALUES (?, ?, ?, ?, ?, ?)"
+	_, err := d.db.Exec(query, fileID, fileName, filePath, fileType, vectorStoreID, fileDescription)
 	if err != nil {
 		return fmt.Errorf("failed to insert uploaded file: %w", err)
 	}
@@ -211,4 +244,28 @@ func (d *Database) Close() error {
 		d.insertVectorStoreStmt.Close()
 	}
 	return d.db.Close()
+}
+
+// BeginTransaction 开始一个事务
+func (d *Database) BeginTransaction() (*sql.Tx, error) {
+	if d.db == nil {
+		return nil, fmt.Errorf("database connection is not initialized")
+	}
+	return d.db.Begin()
+}
+
+// CommitTransaction 提交事务
+func (d *Database) CommitTransaction(tx *sql.Tx) error {
+	if tx == nil {
+		return fmt.Errorf("transaction is nil")
+	}
+	return tx.Commit()
+}
+
+// RollbackTransaction 回滚事务
+func (d *Database) RollbackTransaction(tx *sql.Tx) error {
+	if tx == nil {
+		return fmt.Errorf("transaction is nil")
+	}
+	return tx.Rollback()
 }

@@ -1,11 +1,25 @@
 // models.go
 package models
 
+import "database/sql"
+
 // DatabaseInterface 定义数据库操作接口
 type DatabaseInterface interface {
 	InsertVectorStore(id, name, DisplayName, description, tags, ModelOwner, creator_id string) error
 	GetKnowledgeBaseByID(id string) (*KnowledgeBase, error)
+	GetKnowledgeBaseByName(name string) (*KnowledgeBase, error)
+	UpdateKnowledgeBaseByName(name, displayName, description, tags, modelOwner string) error
+	UpdateKnowledgeBaseIDByName(name string, id string) error
 	UpdateKnowledgeBase(id, displayName, description, tags string) error
+	InsertUploadedFile(fileID, fileName, filePath, fileType, vectorStoreID, fileDescription string) error
+	UpdateUploadedFileStatus(fileID, status string) error
+	InsertFile(id, vectorStoreID string, usageBytes int, fileID string) error
+	Query(query string, args ...interface{}) (*sql.Rows, error)
+	Close() error
+	// 事务管理方法
+	BeginTransaction() (*sql.Tx, error)
+	CommitTransaction(tx *sql.Tx) error
+	RollbackTransaction(tx *sql.Tx) error
 	// 添加其他需要的方法
 }
 

@@ -31,6 +31,27 @@ func HandleUploadFile(c *gin.Context, db *dbop.Database) {
 		c.JSON(http.StatusBadRequest, gin.H{"error": "vector_store_id is required"})
 		return
 	}
+	// 从表单中获取file_description
+	fileDescription := c.PostForm("file_description")
+
+	// 从表单中获取 model_owner
+	modelOwner := c.PostForm("model_owner")
+	if modelOwner == "" {
+		c.JSON(http.StatusBadRequest, gin.H{"error": "model_owner is required"})
+		return
+	}
+
+	// 检查 model_owner 的值
+	switch modelOwner {
+	case "local", "stepfun":
+		// 允许的 model_owner，继续处理
+	default:
+		// 不支持的 model_owner，返回错误
+		c.JSON(http.StatusBadRequest, gin.H{
+			"error": fmt.Sprintf("暂不支持 model_owner 为 '%s' 的知识库文件上传，待接入后再实现", modelOwner),
+		})
+		return
+	}
 
 	// 从表单中获取文件
 	file, header, err := c.Request.FormFile("file")
@@ -56,44 +77,67 @@ func HandleUploadFile(c *gin.Context, db *dbop.Database) {
 		c.JSON(http.StatusInternalServerError, gin.H{"error": "Failed to write file"})
 		return
 	}
-	// 将文件信息存储到数据库中的 uploaded_files 表
+	// 将文件信息存储到数据库中的 uploaded_files 表，生成唯一的 fileID
 	fileID := uuid.New().String()
 	fileType := header.Header.Get("Content-Type")
-	err = db.InsertUploadedFile(fileID, header.Filename, filePath, fileType)
-	if err != nil {
-		logrus.Errorf("Error inserting uploaded file record to database: %v", err)
-		c.JSON(http.StatusInternalServerError, gin.H{"error": "Failed to store file information"})
-		return
+	// 根据 model_owner 的值进行不同处理
+	if modelOwner == "local" {
+		// 处理 local 模式：仅上传到服务器本地并更新数据库
+		err = db.InsertUploadedFile(fileID, header.Filename, filePath, fileType, vectorStoreID, fileDescription)
+		if err != nil {
+			logrus.Errorf("Error inserting uploaded file record to database: %v", err)
+			c.JSON(http.StatusInternalServerError, gin.H{"error": "Failed to store file information"})
+			return
+		}
+
+		// 返回成功响应
+		c.JSON(http.StatusOK, gin.H{
+			"file_id":   fileID,
+			"status":    "File saved successfully to local server",
+			"file_path": filePath,
+		})
+	} else if modelOwner == "stepfun" {
+		// 处理 stepfun 模式：上传到服务器本地，更新数据库，然后上传到 StepFun
+		err = db.InsertUploadedFile(fileID, header.Filename, filePath, fileType, vectorStoreID, fileDescription)
+		if err != nil {
+			logrus.Errorf("Error inserting uploaded file record to database: %v", err)
+			c.JSON(http.StatusInternalServerError, gin.H{"error": "Failed to store file information"})
+			return
+		}
+
+		// 异步调用外部 API 上传文件，并记录 API 返回的文件信息
+		go func() {
+			uploadResp, err := uploadFileToStepFun(vectorStoreID, filePath, header.Filename)
+			if err != nil {
+				logrus.Errorf("Error uploading file to StepFun: %v", err)
+				// 更新上传文件的状态为 "failed"
+				if updateErr := db.UpdateUploadedFileStatus(fileID, "failed"); updateErr != nil {
+					logrus.Errorf("Error updating uploaded file status to 'failed': %v", updateErr)
+				}
+				return
+			}
+
+			// 更新数据库中的 files 表，存储 API 返回的文件信息，增加 fileID
+			err = db.InsertFile(uploadResp.ID, vectorStoreID, uploadResp.UsageBytes, fileID)
+			if err != nil {
+				logrus.Errorf("Error inserting file record to database: %v", err)
+				return
+			}
+
+			// 更新上传文件的状态为 "completed"
+			err = db.UpdateUploadedFileStatus(fileID, "completed")
+			if err != nil {
+				logrus.Errorf("Error updating uploaded file status: %v", err)
+			}
+		}()
+
+		// 返回成功响应
+		c.JSON(http.StatusOK, gin.H{
+			"file_id":   fileID,
+			"status":    "File saved successfully to local server and will be uploaded to StepFun",
+			"file_path": filePath,
+		})
 	}
-
-	// 异步调用外部 API 上传文件，并记录 API 返回的文件信息
-	go func() {
-		uploadResp, err := uploadFileToStepFun(vectorStoreID, filePath, header.Filename)
-		if err != nil {
-			logrus.Errorf("Error uploading file to StepFun: %v", err)
-			return
-		}
-
-		// 更新数据库中的 files 表，存储 API 返回的文件信息，增加 fileID
-		err = db.InsertFile(uploadResp.ID, vectorStoreID, uploadResp.UsageBytes, fileID)
-		if err != nil {
-			logrus.Errorf("Error inserting file record to database: %v", err)
-			return
-		}
-
-		// 更新上传文件的状态为 "completed"
-		err = db.UpdateUploadedFileStatus(fileID, "completed")
-		if err != nil {
-			logrus.Errorf("Error updating uploaded file status: %v", err)
-		}
-	}()
-
-	// 返回成功响应
-	c.JSON(http.StatusOK, gin.H{
-		"file_id":   fileID,
-		"status":    "File saved successfully, will be uploaded to StepFun",
-		"file_path": filePath,
-	})
 }
 
 // uploadFileToStepFun 调用外部 StepFun API 上传文件

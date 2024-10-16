@@ -57,7 +57,7 @@ func main() {
 			handlers.HandleCreateVectorStore(c, db)
 		})
 		// 更新向量存储，使用闭包传递 dbop
-		api.PUT("/update-vector-store/:id", func(c *gin.Context) {
+		api.PUT("/update-vector-store/:name", func(c *gin.Context) {
 			handlers.HandleUpdateKnowledgeBase(c, db)
 		})
 
