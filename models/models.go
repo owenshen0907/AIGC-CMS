@@ -11,16 +11,19 @@ type DatabaseInterface interface {
 	UpdateKnowledgeBaseByName(name, displayName, description, tags, modelOwner string) error
 	UpdateKnowledgeBaseIDByName(name string, id string) error
 	UpdateKnowledgeBase(id, displayName, description, tags string) error
-	InsertUploadedFile(fileID, fileName, filePath, fileType, vectorStoreID, fileDescription string) error
+	//InsertUploadedFile(fileID, fileName, filePath, fileType, fileDescription string) error
+	GetUploadedFileByID(fileID string) (*UploadedFile, error)
 	UpdateUploadedFileStatus(fileID, status string) error
-	InsertFile(id, vectorStoreID string, usageBytes int, fileID string) error
+	InsertFile(id, vectorStoreID string, usageBytes int, fileID, purpose string) error
 	Query(query string, args ...interface{}) (*sql.Rows, error)
 	Close() error
 	// 事务管理方法
 	BeginTransaction() (*sql.Tx, error)
 	CommitTransaction(tx *sql.Tx) error
 	RollbackTransaction(tx *sql.Tx) error
-	// 添加其他需要的方法
+	// 新增事务内插入方法
+	InsertUploadedFileTx(tx *sql.Tx, fileID, fileName, filePath, fileType, fileDescription string) error
+	InsertFileKnowledgeRelationTx(tx *sql.Tx, fileID, knowledgeBaseID string) error
 }
 
 // KnowledgeBase 定义知识库结构体
@@ -118,4 +121,15 @@ type KnowledgeBase struct {
 	CreatedAt   string `json:"created_at"`
 	ModelOwner  string `json:"model_owner"` // 归属模型：stepfun，zhipu, moonshot, baichuan
 	CreatorID   string `json:"creator_id"`
+}
+
+// UploadedFile 代表上传文件的结构体
+type UploadedFile struct {
+	FileID      string `json:"file_id"`
+	Filename    string `json:"file_name"`
+	FilePath    string `json:"file_path"`
+	FileType    string `json:"file_type"`
+	Description string `json:"file_description"`
+	Status      string `json:"status"`
+	UploadTime  string `json:"upload_time"`
 }

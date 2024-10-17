@@ -76,7 +76,7 @@ func NewDatabase() (*Database, error) {
 	}
 	database.insertVectorStoreStmt = insertStmt
 	// 准备插入文件的语句
-	fileInsertStmt, err := database.db.Prepare("INSERT INTO files (id, vector_store_id, usage_bytes, file_id) VALUES (?, ?, ?, ?)")
+	fileInsertStmt, err := database.db.Prepare("INSERT INTO files (id, vector_store_id, usage_bytes, file_id,purpose) VALUES (?, ?, ?, ?,?)")
 	if err != nil {
 		return nil, fmt.Errorf("failed to prepare file insert statement: %w", err)
 	}
@@ -110,15 +110,26 @@ func (d *Database) createTables() error {
 		file_path VARCHAR(512) NOT NULL,            -- 存储路径
 		file_type VARCHAR(50) NOT NULL,             -- 文件类型
 		file_description TEXT,                      -- 文件描述
-		vector_store_id VARCHAR(255) NOT NULL,      -- 知识库ID
 		upload_time TIMESTAMP DEFAULT CURRENT_TIMESTAMP, -- 上传时间
-		FOREIGN KEY (vector_store_id) REFERENCES knowledge_bases(id) -- 假设关联到 knowledge_bases 表
+	    status VARCHAR(50) DEFAULT 'uploaded'        -- 文件状态
 	)`
 	_, err = d.db.Exec(createUploadFilesTable)
 	if err != nil {
 		return fmt.Errorf("failed to create table files: %w", err)
 	}
 
+	createFileKnowledgeRelationsTable := `
+	CREATE TABLE IF NOT EXISTS fileKnowledgeRelations (
+    id INT AUTO_INCREMENT PRIMARY KEY,              -- 自动生成的自增主键
+    file_id VARCHAR(255) NOT NULL,              -- 文件ID
+    knowledge_base_id VARCHAR(255) NOT NULL,    -- 知识库ID
+    FOREIGN KEY (file_id) REFERENCES uploaded_files(file_id) ON DELETE CASCADE,  -- 关联到上传的文件
+    FOREIGN KEY (knowledge_base_id) REFERENCES vector_stores(id) ON DELETE CASCADE  -- 关联到知识库
+)`
+	_, err = d.db.Exec(createFileKnowledgeRelationsTable)
+	if err != nil {
+		return fmt.Errorf("failed to create table files: %w", err)
+	}
 	createFilesTable := `
 	CREATE TABLE IF NOT EXISTS files (
 		id VARCHAR(255) PRIMARY KEY,           -- 主键ID
@@ -126,6 +137,7 @@ func (d *Database) createTables() error {
 		usage_bytes INT NOT NULL,              -- 使用的字节数
 		created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP, -- 创建时间
 		file_id VARCHAR(255),                  -- 与文件关联的ID
+	    purpose VARCHAR(255) DEFAULT NULL,
 		status VARCHAR(50) NOT NULL DEFAULT 'processing', -- 状态字段：处理中的状态
 		FOREIGN KEY (file_id) REFERENCES uploaded_files(file_id) ON DELETE SET NULL, -- 外键关联 uploaded_files
 		FOREIGN KEY (vector_store_id) REFERENCES vector_stores(id) ON DELETE CASCADE -- 外键关联 vector_stores
@@ -199,17 +211,57 @@ func (d *Database) UpdateKnowledgeBase(name, displayName, description, tags stri
 	return err
 }
 
-// InsertUploadedFile 插入 uploaded_files 记录
-func (d *Database) InsertUploadedFile(fileID, fileName, filePath, fileType, vectorStoreID, fileDescription string) error {
-	query := "INSERT INTO uploaded_files (file_id, file_name, file_path, file_type,vector_store_id,file_description) VALUES (?, ?, ?, ?, ?, ?)"
-	_, err := d.db.Exec(query, fileID, fileName, filePath, fileType, vectorStoreID, fileDescription)
+//// InsertUploadedFile 插入 uploaded_files 记录
+//func (d *Database) InsertUploadedFile(fileID, fileName, filePath, fileType, vectorStoreID, fileDescription string) error {
+//	query := "INSERT INTO uploaded_files (file_id, file_name, file_path, file_type,vector_store_id,file_description) VALUES (?, ?, ?, ?, ?, ?)"
+//	_, err := d.db.Exec(query, fileID, fileName, filePath, fileType, vectorStoreID, fileDescription)
+//	if err != nil {
+//		return fmt.Errorf("failed to insert uploaded file: %w", err)
+//	}
+//	return nil
+//}
+
+// InsertUploadedFileTx 在事务中向 uploaded_files 表插入一条记录
+func (d *Database) InsertUploadedFileTx(tx *sql.Tx, fileID, fileName, filePath, fileType, fileDescription string) error {
+	query := `
+		INSERT INTO uploaded_files (file_id, file_name, file_path, file_type, file_description, upload_time, status)
+		VALUES (?, ?, ?, ?, ?, NOW(), 'uploaded')
+	`
+	_, err := tx.Exec(query, fileID, fileName, filePath, fileType, fileDescription)
 	if err != nil {
-		return fmt.Errorf("failed to insert uploaded file: %w", err)
+		return fmt.Errorf("InsertUploadedFileTx: %w", err)
 	}
 	return nil
 }
 
-// UpdateUploadedFileStatus 更新文件状态
+// InsertFileKnowledgeRelationTx 在事务中向 fileKnowledgeRelations 表插入一条关联记录
+func (d *Database) InsertFileKnowledgeRelationTx(tx *sql.Tx, fileID, knowledgeBaseID string) error {
+	query := `
+		INSERT INTO fileKnowledgeRelations (file_id, knowledge_base_id)
+		VALUES (?, ?)
+	`
+	_, err := tx.Exec(query, fileID, knowledgeBaseID)
+	if err != nil {
+		return fmt.Errorf("InsertFileKnowledgeRelationTx: %w", err)
+	}
+	return nil
+}
+
+// GetUploadedFileByID 根据 fileID 获取上传文件记录
+func (d *Database) GetUploadedFileByID(fileID string) (*models.UploadedFile, error) {
+	query := "SELECT file_id, file_name, file_path FROM uploaded_files WHERE file_id = ?"
+	row := d.db.QueryRow(query, fileID)
+	var uf models.UploadedFile
+	if err := row.Scan(&uf.FileID, &uf.Filename, &uf.FilePath); err != nil {
+		if err == sql.ErrNoRows {
+			return nil, nil // 未找到记录
+		}
+		return nil, err
+	}
+	return &uf, nil
+}
+
+// UpdateUploadedFileStatus 更新上传的文件状态status 状态：默认NULL，failed-上传到知识库处理失败，-completed已处理。success-知识库已向量化完成
 func (d *Database) UpdateUploadedFileStatus(fileID, status string) error {
 	query := "UPDATE uploaded_files SET status = ? WHERE file_id = ?"
 	_, err := d.db.Exec(query, status, fileID)
@@ -219,10 +271,10 @@ func (d *Database) UpdateUploadedFileStatus(fileID, status string) error {
 	return nil
 }
 
-// InsertFile 插入文件记录，增加 file_id 作为外键
-func (d *Database) InsertFile(id, vectorStoreID string, usageBytes int, fileID string) error {
-	query := "INSERT INTO files (id, vector_store_id, usage_bytes, file_id) VALUES (?, ?, ?, ?)"
-	_, err := d.insertFileStmt.Exec(query, id, vectorStoreID, usageBytes, fileID)
+// InsertFile 插入文件记录
+func (d *Database) InsertFile(id, vectorStoreID string, usageBytes int, fileID, purpose string) error {
+	//query := "INSERT INTO files (id, vector_store_id, usage_bytes, file_id) VALUES (?, ?, ?, ?)"
+	_, err := d.insertFileStmt.Exec(id, vectorStoreID, usageBytes, fileID, purpose)
 	if err != nil {
 		return fmt.Errorf("failed to insert file: %w", err)
 	}

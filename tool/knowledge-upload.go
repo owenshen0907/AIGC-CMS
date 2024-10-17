@@ -1,29 +1,20 @@
-// uploads.go
+// tool/uploads.go
 package tool
 
 import (
-	"bytes"
-	"encoding/json"
 	"fmt"
 	"io"
-	"mime/multipart"
 	"net/http"
-	"openapi-cms/dbop"
 	"os"
+
+	"openapi-cms/dbop"
 
 	"github.com/gin-gonic/gin"
 	"github.com/google/uuid"
 	"github.com/sirupsen/logrus"
 )
 
-// UploadResponse 用于解析外部 API 的响应
-type UploadResponse struct {
-	ID            string `json:"id"`
-	UsageBytes    int    `json:"usage_bytes"`
-	VectorStoreID string `json:"vector_store_id"`
-}
-
-// handleUploadFile 处理上传文件的请求
+// HandleUploadFile 处理上传文件的请求
 func HandleUploadFile(c *gin.Context, db *dbop.Database) {
 	// 从表单中获取 vector_store_id
 	vectorStoreID := c.PostForm("vector_store_id")
@@ -31,7 +22,8 @@ func HandleUploadFile(c *gin.Context, db *dbop.Database) {
 		c.JSON(http.StatusBadRequest, gin.H{"error": "vector_store_id is required"})
 		return
 	}
-	// 从表单中获取file_description
+
+	// 从表单中获取 file_description
 	fileDescription := c.PostForm("file_description")
 
 	// 从表单中获取 model_owner
@@ -61,6 +53,7 @@ func HandleUploadFile(c *gin.Context, db *dbop.Database) {
 		return
 	}
 	defer file.Close()
+
 	// 保存文件到服务器本地
 	filePath := fmt.Sprintf("./uploads/%s", header.Filename) // 假设存储路径为 ./uploads/
 	out, err := os.Create(filePath)
@@ -77,130 +70,53 @@ func HandleUploadFile(c *gin.Context, db *dbop.Database) {
 		c.JSON(http.StatusInternalServerError, gin.H{"error": "Failed to write file"})
 		return
 	}
+
 	// 将文件信息存储到数据库中的 uploaded_files 表，生成唯一的 fileID
 	fileID := uuid.New().String()
 	fileType := header.Header.Get("Content-Type")
-	// 根据 model_owner 的值进行不同处理
-	if modelOwner == "local" {
-		// 处理 local 模式：仅上传到服务器本地并更新数据库
-		err = db.InsertUploadedFile(fileID, header.Filename, filePath, fileType, vectorStoreID, fileDescription)
-		if err != nil {
-			logrus.Errorf("Error inserting uploaded file record to database: %v", err)
-			c.JSON(http.StatusInternalServerError, gin.H{"error": "Failed to store file information"})
-			return
+	// 开始数据库事务
+	tx, err := db.BeginTransaction()
+	if err != nil {
+		logrus.WithError(err).Error("启动事务时出错")
+		c.JSON(http.StatusInternalServerError, gin.H{"error": "数据库错误"})
+		return
+	}
+
+	// 确保事务在函数结束时正确处理
+	defer func() {
+		if p := recover(); p != nil {
+			tx.Rollback()
+			logrus.Errorf("捕获到 panic: %v", p)
+			c.JSON(http.StatusInternalServerError, gin.H{"error": "内部服务器错误"})
+		} else if err != nil {
+			tx.Rollback()
+		} else {
+			err = db.CommitTransaction(tx)
+			if err != nil {
+				logrus.WithError(err).Error("提交事务时出错")
+				c.JSON(http.StatusInternalServerError, gin.H{"error": "数据库提交错误"})
+			}
 		}
-
-		// 返回成功响应
-		c.JSON(http.StatusOK, gin.H{
-			"file_id":   fileID,
-			"status":    "File saved successfully to local server",
-			"file_path": filePath,
-		})
-	} else if modelOwner == "stepfun" {
-		// 处理 stepfun 模式：上传到服务器本地，更新数据库，然后上传到 StepFun
-		err = db.InsertUploadedFile(fileID, header.Filename, filePath, fileType, vectorStoreID, fileDescription)
-		if err != nil {
-			logrus.Errorf("Error inserting uploaded file record to database: %v", err)
-			c.JSON(http.StatusInternalServerError, gin.H{"error": "Failed to store file information"})
-			return
-		}
-
-		// 异步调用外部 API 上传文件，并记录 API 返回的文件信息
-		go func() {
-			uploadResp, err := uploadFileToStepFun(vectorStoreID, filePath, header.Filename)
-			if err != nil {
-				logrus.Errorf("Error uploading file to StepFun: %v", err)
-				// 更新上传文件的状态为 "failed"
-				if updateErr := db.UpdateUploadedFileStatus(fileID, "failed"); updateErr != nil {
-					logrus.Errorf("Error updating uploaded file status to 'failed': %v", updateErr)
-				}
-				return
-			}
-
-			// 更新数据库中的 files 表，存储 API 返回的文件信息，增加 fileID
-			err = db.InsertFile(uploadResp.ID, vectorStoreID, uploadResp.UsageBytes, fileID)
-			if err != nil {
-				logrus.Errorf("Error inserting file record to database: %v", err)
-				return
-			}
-
-			// 更新上传文件的状态为 "completed"
-			err = db.UpdateUploadedFileStatus(fileID, "completed")
-			if err != nil {
-				logrus.Errorf("Error updating uploaded file status: %v", err)
-			}
-		}()
-
-		// 返回成功响应
-		c.JSON(http.StatusOK, gin.H{
-			"file_id":   fileID,
-			"status":    "File saved successfully to local server and will be uploaded to StepFun",
-			"file_path": filePath,
-		})
-	}
-}
-
-// uploadFileToStepFun 调用外部 StepFun API 上传文件
-func uploadFileToStepFun(vectorStoreID string, filePath, filename string) (*UploadResponse, error) {
-	// StepFun API URL
-	url := fmt.Sprintf("https://api.stepfun.com/v1/vector_stores/%s/files", vectorStoreID)
-
-	// 打开本地文件
-	file, err := os.Open(filePath)
+	}()
+	// 插入上传的文件信息到 uploaded_files 表中
+	err = db.InsertUploadedFileTx(tx, fileID, header.Filename, filePath, fileType, fileDescription)
 	if err != nil {
-		return nil, fmt.Errorf("failed to open file: %w", err)
+		logrus.Errorf("将上传文件记录插入数据库时出错: %v", err)
+		c.JSON(http.StatusInternalServerError, gin.H{"error": "无法存储文件信息"})
+		return
 	}
-	defer file.Close()
-	// 创建缓冲区和 multipart 写入器
-	var requestBody bytes.Buffer
-	writer := multipart.NewWriter(&requestBody)
-
-	// 添加文件字段
-	part, err := writer.CreateFormFile("file", filename)
+	// 插入文件与知识库的关联关系到 fileKnowledgeRelations 表中
+	err = db.InsertFileKnowledgeRelationTx(tx, fileID, vectorStoreID)
 	if err != nil {
-		return nil, fmt.Errorf("failed to create form file: %w", err)
-	}
-	_, err = io.Copy(part, file)
-	if err != nil {
-		return nil, fmt.Errorf("failed to copy file data: %w", err)
+		logrus.Errorf("插入文件与知识库关联关系时出错: %v", err)
+		c.JSON(http.StatusInternalServerError, gin.H{"error": "无法关联文件与知识库"})
+		return
 	}
 
-	// 关闭写入器以设置结束边界
-	err = writer.Close()
-	if err != nil {
-		return nil, fmt.Errorf("failed to close writer: %w", err)
-	}
-
-	// 创建 HTTP 请求
-	req, err := http.NewRequest("POST", url, &requestBody)
-	if err != nil {
-		return nil, fmt.Errorf("failed to create HTTP request: %w", err)
-	}
-
-	// 设置必要的头部
-	req.Header.Set("Content-Type", writer.FormDataContentType())
-	req.Header.Set("Authorization", "Bearer "+os.Getenv("STEPFUN_API_KEY"))
-
-	// 发送请求
-	client := &http.Client{}
-	resp, err := client.Do(req)
-	if err != nil {
-		return nil, fmt.Errorf("failed to perform HTTP request: %w", err)
-	}
-	defer resp.Body.Close()
-
-	// 检查响应状态
-	if resp.StatusCode != http.StatusOK && resp.StatusCode != http.StatusCreated {
-		bodyBytes, _ := io.ReadAll(resp.Body)
-		return nil, fmt.Errorf("received non-200 response: %d - %s", resp.StatusCode, string(bodyBytes))
-	}
-
-	// 解析响应 JSON
-	var uploadResp UploadResponse
-	err = json.NewDecoder(resp.Body).Decode(&uploadResp)
-	if err != nil {
-		return nil, fmt.Errorf("failed to decode response JSON: %w", err)
-	}
-
-	return &uploadResp, nil
+	// 返回成功响应
+	c.JSON(http.StatusOK, gin.H{
+		"file_id":   fileID,
+		"status":    "文件已成功保存并与知识库关联",
+		"file_path": filePath,
+	})
 }

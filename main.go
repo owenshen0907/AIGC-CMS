@@ -52,11 +52,11 @@ func main() {
 	// 定义路由并注入依赖
 	api := router.Group("/api")
 	{
-		// 创建向量存储，使用闭包传递 dbop
+		// 创建向量数据库基础信息，使用闭包传递 dbop
 		api.POST("/create-vector-store", func(c *gin.Context) {
 			handlers.HandleCreateVectorStore(c, db)
 		})
-		// 更新向量存储，使用闭包传递 dbop
+		// 更新向量数据库基础信息，使用闭包传递 dbop
 		api.PUT("/update-vector-store/:name", func(c *gin.Context) {
 			handlers.HandleUpdateKnowledgeBase(c, db)
 		})
@@ -72,6 +72,10 @@ func main() {
 		// 新增上传文件路由，使用闭包传递 dbop
 		api.POST("/knowledge-uploads-file", func(c *gin.Context) {
 			tool.HandleUploadFile(c, db)
+		})
+		// 新增触发外部上传的路由，使用闭包传递 dbop（使用各模型厂商知识库）
+		api.POST("/trigger-external-upload", func(c *gin.Context) {
+			tool.HandleTriggerExternalUpload(c, db)
 		})
 	}
 

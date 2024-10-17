@@ -79,7 +79,8 @@ func GetFilesByKnowledgeBaseID(db *Database) gin.HandlerFunc {
 		// SQL 查询，获取文件信息及其相关的向量存储信息
 		query := `
 			SELECT 
-				uf.file_name, 
+				uf.file_id,
+			    uf.file_name, 
 				uf.file_path, 
 				uf.file_type, 
 				COALESCE(uf.file_description, '') AS file_description, 
@@ -89,8 +90,10 @@ func GetFilesByKnowledgeBaseID(db *Database) gin.HandlerFunc {
 				COALESCE(f.created_at, '') AS vector_file_created_at, 
 				COALESCE(f.status, '') AS status  -- 如果没有状态则返回空字符串
 			FROM uploaded_files uf
+			LEFT JOIN fileKnowledgeRelations fkr ON uf.file_id = fkr.file_id  -- 通过 fileKnowledgeRelations 关联文件
+			LEFT JOIN vector_stores vs ON fkr.knowledge_base_id = vs.id  -- 关联到 vector_stores 表
 			LEFT JOIN files f ON uf.file_id = f.file_id  -- 使用 LEFT JOIN 获取可能为空的 files 表数据
-			WHERE uf.vector_store_id = ?
+			WHERE vs.id = ?
 		`
 
 		rows, err := db.Query(query, knowledgeBaseID)
@@ -103,6 +106,7 @@ func GetFilesByKnowledgeBaseID(db *Database) gin.HandlerFunc {
 
 		// 定义用于存储返回数据的结构体
 		type FileInfo struct {
+			FileId              string `json:"file_id"`
 			FileName            string `json:"file_name"`
 			FilePath            string `json:"file_path"`
 			FileType            string `json:"file_type"`
@@ -119,7 +123,7 @@ func GetFilesByKnowledgeBaseID(db *Database) gin.HandlerFunc {
 		// 处理查询结果
 		for rows.Next() {
 			var file FileInfo
-			if err := rows.Scan(&file.FileName, &file.FilePath, &file.FileType, &file.FileDescription, &file.UploadTime, &file.VectorFileID, &file.UsageBytes, &file.VectorFileCreatedAt, &file.Status); err != nil {
+			if err := rows.Scan(&file.FileId, &file.FileName, &file.FilePath, &file.FileType, &file.FileDescription, &file.UploadTime, &file.VectorFileID, &file.UsageBytes, &file.VectorFileCreatedAt, &file.Status); err != nil {
 				logrus.Printf("扫描文件数据失败: %v", err)
 				c.JSON(http.StatusInternalServerError, gin.H{"error": "Database error", "details": err.Error()})
 				return
