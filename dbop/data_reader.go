@@ -40,7 +40,7 @@ func HandleGetData(db *Database) gin.HandlerFunc {
 
 // getKnowledgeBases 获取知识库数据
 func getKnowledgeBases(c *gin.Context, db *Database) {
-	query := "SELECT id, name,COALESCE(display_name,''), COALESCE(description,''), COALESCE(tags,''), created_at,model_owner,creator_id FROM vector_stores"
+	query := "SELECT id, name,COALESCE(display_name,''), COALESCE(description,''), COALESCE(tags,''), created_at,model_owner,creator_id FROM vector_stores ORDER BY CASE WHEN model_owner = 'local' THEN 0 ELSE 1  END ASC, id ASC;"
 	rows, err := db.Query(query)
 	if err != nil {
 		logrus.Printf("查询知识库失败: %v", err)

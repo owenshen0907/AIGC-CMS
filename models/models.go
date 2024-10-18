@@ -41,6 +41,8 @@ type RequestPayload struct {
 	Tags           string      `json:"tags"`            // 标签以逗号分隔的字符串
 	VectorStoreID  string      `json:"vector_store_id"` // 新增字段，用于传递 vector_store_id
 	ModelOwner     string      `json:"model_owner"`     // 新增字段
+	WebSearch      bool        `json:"web_search"`
+	VectorFileId   string      `json:"vector_file_id"`
 }
 
 // File 定义文件结构

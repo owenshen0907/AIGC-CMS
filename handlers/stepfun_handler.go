@@ -5,6 +5,7 @@ import (
 	"bytes"
 	"encoding/json"
 	"fmt"
+	"io/ioutil"
 	"net/http"
 	"openapi-cms/models"
 	"os"
@@ -43,7 +44,7 @@ func HandleChatMessagesStepFun(c *gin.Context) {
 
 	// 构建 StepFunRequestPayload
 	stepFunRequest := models.StepFunRequestPayload{
-		Model:  "step-2-16k", // 根据需要选择模型
+		Model:  "step-1-128k", // 根据需要选择模型
 		Stream: true,
 	}
 
@@ -59,20 +60,40 @@ func HandleChatMessagesStepFun(c *gin.Context) {
 		Content: payload.Query,
 	}
 
-	// 将消息添加到请求中
-	stepFunRequest.Messages = []models.StepFunMessage{systemMessage, userMessage}
+	//如果前端传了vector_file_id,那么就将文件内容进行解析
+	//解析的方式是
+	//curl https://api.stepfun.com/v1/files/file-abc123/content \
+	//-H "Authorization: Bearer $STEP_API_KEY"
+	//file-abc123可以用payload.vector_file_id替代
+	//返回的值用fileContent进行存储
+	if strings.TrimSpace(payload.VectorFileId) != "" {
+		fileContent := looadFileContent(c, payload.VectorFileId, apiKey)
+		// 用户content消息
+		contentMessage := models.StepFunMessage{
+			Role:    "user",
+			Content: fileContent,
+		}
+		// 如果文件内容不为空，则添加contentMessage到将消息添加到stepFunRequest.Messages中
+		if fileContent != "" {
+			stepFunRequest.Messages = append(stepFunRequest.Messages, systemMessage, userMessage, contentMessage)
+		} else {
+			stepFunRequest.Messages = []models.StepFunMessage{systemMessage, userMessage}
+		}
+	}
 
 	// 构建工具列表
 	tools := []models.StepFunTool{}
 
 	// 添加 web_search 工具
-	webSearchTool := models.StepFunTool{
-		Type: "web_search",
-		Function: models.StepFunToolFunction{
-			Description: "这个工具可以用来搜索互联网的信息",
-		},
+	if payload.WebSearch {
+		webSearchTool := models.StepFunTool{
+			Type: "web_search",
+			Function: models.StepFunToolFunction{
+				Description: "这个工具可以用来搜索互联网的信息",
+			},
+		}
+		tools = append(tools, webSearchTool)
 	}
-	tools = append(tools, webSearchTool)
 
 	// 如果前端传递了 vector_store_id，则添加 retrieval 工具
 	if strings.TrimSpace(payload.VectorStoreID) != "" {
@@ -167,6 +188,43 @@ func HandleChatMessagesStepFun(c *gin.Context) {
 	}
 
 	c.Status(http.StatusOK)
+}
+
+func looadFileContent(c *gin.Context, VectorFileId, apiKey string) string {
+	fileContentURL := fmt.Sprintf("https://api.stepfun.com/v1/files/%s/content", VectorFileId)
+	req, err := http.NewRequest("GET", fileContentURL, nil)
+	if err != nil {
+		logrus.Printf("Error creating file content request: %v", err)
+		c.JSON(http.StatusInternalServerError, gin.H{"error": "Server error"})
+		return ""
+	}
+	req.Header.Set("Authorization", fmt.Sprintf("Bearer %s", apiKey))
+	// Send the request
+	client := &http.Client{}
+	resp, err := client.Do(req)
+	if err != nil {
+		logrus.Printf("Error sending file content request: %v", err)
+		c.JSON(http.StatusInternalServerError, gin.H{"error": "Failed to retrieve file content"})
+		return ""
+	}
+	defer resp.Body.Close()
+
+	// Check response status
+	if resp.StatusCode != http.StatusOK {
+		logrus.Printf("Failed to retrieve file content, status code: %d", resp.StatusCode)
+		c.JSON(http.StatusInternalServerError, gin.H{"error": "Failed to retrieve file content"})
+		return ""
+	}
+
+	// Read the response body
+	fileContentBytes, err := ioutil.ReadAll(resp.Body)
+	if err != nil {
+		logrus.Printf("Error reading file content response: %v", err)
+		c.JSON(http.StatusInternalServerError, gin.H{"error": "Failed to read file content"})
+		return ""
+	}
+	// Store the file content
+	return string(fileContentBytes)
 }
 
 // sendStepFunRequest 通用的 HTTP 请求发送函数
