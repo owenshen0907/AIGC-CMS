@@ -249,10 +249,10 @@ func (d *Database) InsertFileKnowledgeRelationTx(tx *sql.Tx, fileID, knowledgeBa
 
 // GetUploadedFileByID 根据 fileID 获取上传文件记录
 func (d *Database) GetUploadedFileByID(fileID string) (*models.UploadedFile, error) {
-	query := "SELECT file_id, file_name, file_path FROM uploaded_files WHERE file_id = ?"
+	query := "SELECT file_id, file_name, file_path,file_type FROM uploaded_files WHERE file_id = ?"
 	row := d.db.QueryRow(query, fileID)
 	var uf models.UploadedFile
-	if err := row.Scan(&uf.FileID, &uf.Filename, &uf.FilePath); err != nil {
+	if err := row.Scan(&uf.FileID, &uf.Filename, &uf.FilePath, &uf.FileType); err != nil {
 		if err == sql.ErrNoRows {
 			return nil, nil // 未找到记录
 		}

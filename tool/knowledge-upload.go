@@ -16,7 +16,7 @@ import (
 
 // HandleUploadFile 处理上传文件的请求
 func HandleUploadFile(c *gin.Context, db *dbop.Database) {
-	// 从表单中获取 vector_store_id
+	// 从表单中获取，知识库id vector_store_id
 	vectorStoreID := c.PostForm("vector_store_id")
 	if vectorStoreID == "" {
 		c.JSON(http.StatusBadRequest, gin.H{"error": "vector_store_id is required"})

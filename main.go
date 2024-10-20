@@ -63,7 +63,7 @@ func main() {
 
 		// 聊天消息处理器
 		api.POST("/chat-messages/dify", handlers.HandleChatMessagesDify)
-		api.POST("/chat-messages/stepfun", handlers.HandleChatMessagesStepFun)
+		api.POST("/chat-messages/stepfun", handlers.HandleChatMessagesStepFun(db))
 
 		// 获取数据，使用闭包传递 dbop
 		api.GET("/get-data", dbop.HandleGetData(db))

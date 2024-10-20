@@ -35,14 +35,16 @@ type RequestPayload struct {
 	ResponseMode   string      `json:"response_mode,omitempty"`
 	ConversationID string      `json:"conversation_id,omitempty"`
 	User           string      `json:"user,omitempty"`
-	Files          []File      `json:"files,omitempty"`
-	Name           string      `json:"name"`
-	Description    string      `json:"description"`
-	Tags           string      `json:"tags"`            // 标签以逗号分隔的字符串
-	VectorStoreID  string      `json:"vector_store_id"` // 新增字段，用于传递 vector_store_id
-	ModelOwner     string      `json:"model_owner"`     // 新增字段
-	WebSearch      bool        `json:"web_search"`
-	VectorFileId   string      `json:"vector_file_id"`
+	//Files          []File      `json:"files,omitempty"`
+	FileIDs       []string `json:"file_ids,omitempty"`
+	FileType      string   `json:"file_type"`
+	Name          string   `json:"name"`
+	Description   string   `json:"description"`
+	Tags          string   `json:"tags"`            // 标签以逗号分隔的字符串
+	VectorStoreID string   `json:"vector_store_id"` // 新增字段，用于传递 vector_store_id
+	ModelOwner    string   `json:"model_owner"`     // 新增字段
+	WebSearch     bool     `json:"web_search"`
+	VectorFileId  string   `json:"vector_file_id"`
 }
 
 // File 定义文件结构
@@ -111,6 +113,22 @@ type DifyResponse struct {
 		CompletionTokens int `json:"completion_tokens"`
 		TotalTokens      int `json:"total_tokens"`
 	} `json:"usage"`
+}
+
+// TokenCountRequest represents the request payload for token counting
+type TokenCountRequest struct {
+	Model    string           `json:"model"`
+	Messages []StepFunMessage `json:"messages"`
+}
+
+// TokenCountResponseData represents the 'data' field in the token count response
+type TokenCountResponseData struct {
+	TotalTokens int `json:"total_tokens"`
+}
+
+// TokenCountResponse represents the response from the token counting API
+type TokenCountResponse struct {
+	Data TokenCountResponseData `json:"data"`
 }
 
 // KnowledgeBase 定义知识库结构体
