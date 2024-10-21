@@ -211,16 +211,6 @@ func (d *Database) UpdateKnowledgeBase(name, displayName, description, tags stri
 	return err
 }
 
-//// InsertUploadedFile 插入 uploaded_files 记录
-//func (d *Database) InsertUploadedFile(fileID, fileName, filePath, fileType, vectorStoreID, fileDescription string) error {
-//	query := "INSERT INTO uploaded_files (file_id, file_name, file_path, file_type,vector_store_id,file_description) VALUES (?, ?, ?, ?, ?, ?)"
-//	_, err := d.db.Exec(query, fileID, fileName, filePath, fileType, vectorStoreID, fileDescription)
-//	if err != nil {
-//		return fmt.Errorf("failed to insert uploaded file: %w", err)
-//	}
-//	return nil
-//}
-
 // InsertUploadedFileTx 在事务中向 uploaded_files 表插入一条记录
 func (d *Database) InsertUploadedFileTx(tx *sql.Tx, fileID, fileName, filePath, fileType, fileDescription string) error {
 	query := `

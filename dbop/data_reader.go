@@ -80,7 +80,7 @@ func GetFilesByKnowledgeBaseID(db *Database) gin.HandlerFunc {
 			LEFT JOIN fileKnowledgeRelations fkr ON uf.file_id = fkr.file_id  -- 通过 fileKnowledgeRelations 关联文件
 			LEFT JOIN vector_stores vs ON fkr.knowledge_base_id = vs.id  -- 关联到 vector_stores 表
 			LEFT JOIN files f ON uf.file_id = f.file_id  -- 使用 LEFT JOIN 获取可能为空的 files 表数据
-			WHERE vs.id = ?
+			WHERE uf.file_type NOT LIKE 'image%' and vs.id = ?
 		`
 
 		rows, err := db.Query(query, knowledgeBaseID)
