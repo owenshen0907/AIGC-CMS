@@ -44,7 +44,7 @@ type RequestPayload struct {
 	VectorStoreID string   `json:"vector_store_id"` // 新增字段，用于传递 vector_store_id
 	ModelOwner    string   `json:"model_owner"`     // 新增字段
 	WebSearch     bool     `json:"web_search"`
-	VectorFileId  string   `json:"vector_file_id"`
+	VectorFileIds []string `json:"vector_file_ids,omitempty"`
 }
 
 // File 定义文件结构

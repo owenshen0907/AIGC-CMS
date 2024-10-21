@@ -10,6 +10,7 @@ import (
 	"net/http"
 	"openapi-cms/dbop"
 	"openapi-cms/models"
+	"openapi-cms/tool"
 	"os"
 	"strings"
 
@@ -51,73 +52,22 @@ func HandleChatMessagesStepFun(db *dbop.Database) gin.HandlerFunc {
 			Content: "你是由阶跃星辰为微信对话框提供的AI图像分析师，善于图片分析，可以分析图片中的文字，地址，建筑，人物，动物，食物，植物等结构清晰的物品。在输出结果的时候请将内容排版的美观，使其在微信中显示时易于阅读。请使用适当的换行和空行，不要包含 `\\n` 等符号。示例格式：",
 		}
 
-		// 用户文本消息。如果payload.FileType=""那么就userMessage就用下面的内容
-		//userMessage := models.StepFunMessage{
-		//	Role:    "user",
-		//	Content: payload.Query,
-		//}
-		//用户图片消息。如果payload.FileType="img"那么就userMessage就用下面的内容结构
-		//这里面image/jpg是图片的格式，bstring1和bstring2是图片的base64编码。
-		//payload.FileIDs数组里存的是图片的id,具体会传多少图片，由前端来控制，后端不用管。
-		//你可以通过这个脚本查到图片的路径和格式。SELECT file_path,file_type FROM uploaded_files where file_id = '38f0f230-d731-4049-b460-162a8a0ff782';
-		//{"role": "user", "content":
-		//              [
-		//                  {"type": "image_url", "image_url": {"url": "data:image/jpg;base64,%s" % (bstring1),"detail": "high"}},
-		//                  {"type": "image_url", "image_url": {"url": "data:image/jpg;base64,%s" % (bstring2),"detail": "high"}},
-		//                  {"type": "text", "text": payload.Query}
-		//              ]
-		//           }
-
 		var userMessage models.StepFunMessage
 
 		if payload.FileType == "img" && len(payload.FileIDs) > 0 {
 			// 处理图片消息
-			var content []models.StepFunMessageContent
-			for _, fileID := range payload.FileIDs {
-				// 获取上传的文件记录
-				uploadedFile, err := db.GetUploadedFileByID(fileID)
-				if err != nil {
-					logrus.Printf("Error retrieving uploaded file: %v", err)
-					c.JSON(http.StatusInternalServerError, gin.H{"error": "Failed to retrieve uploaded file"})
-					return
-				}
-				if uploadedFile == nil {
-					logrus.Printf("Uploaded file not found for ID: %s", fileID)
-					c.JSON(http.StatusBadRequest, gin.H{"error": "Uploaded file not found"})
-					return
-				}
-
-				// 读取图片文件并进行 Base64 编码
-				imageData, err := ioutil.ReadFile(uploadedFile.FilePath)
-				if err != nil {
-					logrus.Printf("Error reading image file: %v", err)
-					c.JSON(http.StatusInternalServerError, gin.H{"error": "Failed to read image file"})
-					return
-				}
-				encodedImage := base64.StdEncoding.EncodeToString(imageData)
-				imageURL := fmt.Sprintf("data:%s;base64,%s", uploadedFile.FileType, encodedImage)
-
-				// 构建图片消息内容
-				imageContent := models.StepFunMessageContent{
-					Type: "image_url",
-					ImageURL: &models.StepFunMessageImageURL{
-						URL:    imageURL,
-						Detail: "high",
-					},
-				}
-				content = append(content, imageContent)
+			userMessage, err = processImageMessages(db, payload)
+			if err != nil {
+				logrus.Printf("处理图片消息时出错: %v", err)
+				// 假设 processImageMessages 已经处理了响应
+				return
 			}
-
-			// 添加文本内容
-			textContent := models.StepFunMessageContent{
-				Type: "text",
-				Text: payload.Query,
-			}
-			content = append(content, textContent)
-
-			userMessage = models.StepFunMessage{
-				Role:    "user",
-				Content: content,
+		} else if payload.FileType == "file" && len(payload.FileIDs) > 0 {
+			// 处理文件消息
+			err = processUploadedFiles(db, payload, &userMessage, apiKey, c)
+			if err != nil {
+				// processUploadedFiles 已经处理了响应
+				return
 			}
 		} else {
 			// 处理文本消息
@@ -131,15 +81,20 @@ func HandleChatMessagesStepFun(db *dbop.Database) gin.HandlerFunc {
 		messages := []models.StepFunMessage{systemMessage, userMessage}
 
 		// 如果前端传了 vector_file_id，那么将文件内容解析并存入 messages 里
-		if strings.TrimSpace(payload.VectorFileId) != "" {
-			fileContent := looadFileContent(c, payload.VectorFileId, apiKey)
-			if fileContent != "" {
-				contentMessage := models.StepFunMessage{
-					Role:    "user",
-					Content: fileContent,
+		if len(payload.VectorFileIds) > 0 {
+			insertIndex := 1
+			for _, vectorFileId := range payload.VectorFileIds {
+				fileContent := loadFileContent(c, vectorFileId, apiKey)
+				if fileContent != "" {
+					contentMessage := models.StepFunMessage{
+						Role:    "user",
+						Content: fileContent,
+					}
+					// 在指定位置插入 contentMessage
+					messages = append(messages[:insertIndex], append([]models.StepFunMessage{contentMessage}, messages[insertIndex:]...)...)
+					// 每次插入后，插入位置增加 2
+					insertIndex += 2
 				}
-				// 在索引 1 处插入 contentMessage
-				messages = append(messages[:1], append([]models.StepFunMessage{contentMessage}, messages[1:]...)...)
 			}
 		}
 
@@ -350,7 +305,7 @@ func countTokens(apiKey string, messages []models.StepFunMessage) (int, error) {
 	return tokenCountResp.Data.TotalTokens, nil
 }
 
-func looadFileContent(c *gin.Context, VectorFileId, apiKey string) string {
+func loadFileContent(c *gin.Context, VectorFileId, apiKey string) string {
 	fileContentURL := fmt.Sprintf("https://api.stepfun.com/v1/files/%s/content", VectorFileId)
 	req, err := http.NewRequest("GET", fileContentURL, nil)
 	if err != nil {
@@ -385,6 +340,103 @@ func looadFileContent(c *gin.Context, VectorFileId, apiKey string) string {
 	}
 	// Store the file content
 	return string(fileContentBytes)
+}
+
+// processImageMessages 处理图片消息，通过读取和编码图片文件来构建消息内容。
+func processImageMessages(db *dbop.Database, payload models.RequestPayload) (models.StepFunMessage, error) {
+	var content []models.StepFunMessageContent
+	for _, fileID := range payload.FileIDs {
+		// 通过 FileID 获取上传的文件记录
+		uploadedFile, err := db.GetUploadedFileByID(fileID)
+		if err != nil {
+			logrus.Printf("检索上传文件时出错: %v", err)
+			return models.StepFunMessage{}, fmt.Errorf("无法检索上传文件")
+		}
+		if uploadedFile == nil {
+			logrus.Printf("未找到 FileID 为 %s 的上传文件", fileID)
+			return models.StepFunMessage{}, fmt.Errorf("未找到 FileID 为 %s 的上传文件", fileID)
+		}
+
+		// 读取并进行 Base64 编码
+		imageData, err := ioutil.ReadFile(uploadedFile.FilePath)
+		if err != nil {
+			logrus.Printf("读取图片文件时出错: %v", err)
+			return models.StepFunMessage{}, fmt.Errorf("读取图片文件失败")
+		}
+		encodedImage := base64.StdEncoding.EncodeToString(imageData)
+		imageURL := fmt.Sprintf("data:%s;base64,%s", uploadedFile.FileType, encodedImage)
+
+		// 构建图片消息内容
+		imageContent := models.StepFunMessageContent{
+			Type: "image_url",
+			ImageURL: &models.StepFunMessageImageURL{
+				URL:    imageURL,
+				Detail: "high",
+			},
+		}
+		content = append(content, imageContent)
+	}
+
+	// 添加来自 payload 查询的文本内容
+	textContent := models.StepFunMessageContent{
+		Type: "text",
+		Text: payload.Query,
+	}
+	content = append(content, textContent)
+
+	return models.StepFunMessage{
+		Role:    "user",
+		Content: content,
+	}, nil
+}
+
+// processUploadedFiles 处理 FileType 为 "file" 且提供了 FileIDs 的文件上传逻辑。
+// 它包括从数据库检索文件记录、上传文件到 StepFun、更新文件状态，以及将 VectorFileId 添加到 payload 中。
+func processUploadedFiles(db *dbop.Database, payload models.RequestPayload, userMessage *models.StepFunMessage, apiKey string, c *gin.Context) error {
+	for _, fileID := range payload.FileIDs {
+		// 通过 FileID 获取上传的文件记录
+		fileRecord, err := db.GetUploadedFileByID(fileID)
+		if err != nil {
+			logrus.Errorf("从数据库检索文件记录时出错: %v", err)
+			c.JSON(http.StatusInternalServerError, gin.H{"error": "无法检索文件信息"})
+			return err
+		}
+		if fileRecord == nil {
+			logrus.Printf("未找到 FileID 为 %s 的上传文件", fileID)
+			c.JSON(http.StatusBadRequest, gin.H{"error": "上传的文件未找到"})
+			return fmt.Errorf("未找到 FileID 为 %s 的上传文件", fileID)
+		}
+
+		// 将文件上传到 StepFun 并进行提取
+		uploadResp, err := tool.UploadFileToStepFunWithExtract(fileRecord.FilePath, fileRecord.Filename)
+		if err != nil {
+			logrus.Errorf("上传文件到 StepFun 时出错: %v", err)
+			// 更新文件状态为 "failed"
+			if updateErr := db.UpdateUploadedFileStatus(fileID, "failed"); updateErr != nil {
+				logrus.Errorf("更新文件状态为 'failed' 时出错: %v", updateErr)
+			}
+			c.JSON(http.StatusInternalServerError, gin.H{"error": "文件上传失败"})
+			return err
+		}
+
+		// 将上传后的文件信息插入到数据库中
+		err = db.InsertFile(uploadResp.ID, "local20241015145535", uploadResp.UsageBytes, fileID, "file-extract")
+		if err != nil {
+			logrus.Errorf("将文件记录插入数据库时出错: %v", err)
+			c.JSON(http.StatusInternalServerError, gin.H{"error": "插入文件记录失败"})
+			return err
+		}
+
+		// 更新文件状态为 "completed"
+		err = db.UpdateUploadedFileStatus(fileID, "completed")
+		if err != nil {
+			logrus.Errorf("更新文件状态为 'completed' 时出错: %v", err)
+			// 不返回错误，因为主流程可能仍需继续
+		}
+		// 将 VectorStoreID 添加到 payload 的 VectorFileIds 中
+		payload.VectorFileIds = append(payload.VectorFileIds, uploadResp.VectorStoreID)
+	}
+	return nil
 }
 
 // sendStepFunRequest 通用的 HTTP 请求发送函数

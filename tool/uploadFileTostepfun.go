@@ -77,7 +77,7 @@ func uploadFileToStepFunWithRetrieval(vectorStoreID string, filePath, filename s
 }
 
 // uploadFileToStepFun 调用外部 StepFun API 上传文件
-func uploadFileToStepFunWithExtract(filePath, filename string) (*UploadResponse, error) {
+func UploadFileToStepFunWithExtract(filePath, filename string) (*UploadResponse, error) {
 	// StepFun API URL
 	url := fmt.Sprintf("https://api.stepfun.com/v1/files")
 

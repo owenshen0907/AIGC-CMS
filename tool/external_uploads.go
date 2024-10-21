@@ -89,7 +89,7 @@ func HandleTriggerExternalUpload(c *gin.Context, db *dbop.Database) {
 		}
 	case "local":
 		if req.Purpose == "file-extract" {
-			uploadResp, err := uploadFileToStepFunWithExtract(fileRecord.FilePath, fileRecord.Filename)
+			uploadResp, err := UploadFileToStepFunWithExtract(fileRecord.FilePath, fileRecord.Filename)
 			if err != nil {
 				logrus.Errorf("Error uploading file to local: %v", err)
 				// 更新上传文件的状态为 "failed"
