@@ -14,7 +14,7 @@ type DatabaseInterface interface {
 	//InsertUploadedFile(fileID, fileName, filePath, fileType, fileDescription string) error
 	GetUploadedFileByID(fileID string) (*UploadedFile, error)
 	UpdateUploadedFileStatus(fileID, status string) error
-	InsertFile(id, vectorStoreID string, usageBytes int, fileID, purpose string) error
+	InsertFile(id, vectorStoreID string, usageBytes int, fileID, status, purpose string) error
 	Query(query string, args ...interface{}) (*sql.Rows, error)
 	Close() error
 	// 事务管理方法
@@ -28,7 +28,7 @@ type DatabaseInterface interface {
 
 // KnowledgeBase 定义知识库结构体
 
-// RequestPayload 定义接收自前端的请求结构
+// RequestPayload 定义了，选择stepfun时，接收自前端的请求结构
 type RequestPayload struct {
 	Inputs         interface{} `json:"inputs,omitempty"`
 	Query          string      `json:"query,omitempty"`
@@ -48,11 +48,11 @@ type RequestPayload struct {
 }
 
 // File 定义文件结构
-type File struct {
-	Type           string `json:"type"`
-	TransferMethod string `json:"transfer_method"`
-	URL            string `json:"url"`
-}
+//type File struct {
+//	Type           string `json:"type"`
+//	TransferMethod string `json:"transfer_method"`
+//	URL            string `json:"url"`
+//}
 
 // StepFunMessageContent 定义消息内容结构
 type StepFunMessageContent struct {
@@ -94,7 +94,7 @@ type StepFunRequestPayload struct {
 	Tools    []StepFunTool    `json:"tools,omitempty"` // 新增字段，用于存储工具
 }
 
-// StepFunResponse 定义 StepFun API 的响应结构
+// StepFunResponse 定义 StepFun API 的响应结构-创建知识库
 type StepFunResponse struct {
 	ID            string `json:"id"`
 	UsageBytes    int    `json:"usage_bytes,omitempty"`
@@ -143,7 +143,7 @@ type KnowledgeBase struct {
 	CreatorID   string `json:"creator_id"`
 }
 
-// UploadedFile 代表上传文件的结构体
+// UploadedFile 接收：前端请求，上传文件到后台
 type UploadedFile struct {
 	FileID      string `json:"file_id"`
 	Filename    string `json:"file_name"`
@@ -152,4 +152,31 @@ type UploadedFile struct {
 	Description string `json:"file_description"`
 	Status      string `json:"status"`
 	UploadTime  string `json:"upload_time"`
+}
+
+// FileStatusResponse 请求： StepFun API ,获取：doc parser上传文件的响应，和获取文件状态响应
+type FileStatusResponse struct {
+	ID        string `json:"id"`
+	Object    string `json:"object"`
+	Bytes     int    `json:"bytes"`
+	CreatedAt int64  `json:"created_at"`
+	Filename  string `json:"filename"`
+	Purpose   string `json:"purpose"`
+	Status    string `json:"status"`
+}
+
+// TriggerUploadRequest 接收：前端请求，上传文件到stepfun.
+// 【知识库页面上传文件】
+type TriggerUploadRequest struct {
+	ModelOwner    string `json:"model_owner" binding:"required"`
+	FileID        string `json:"file_id" binding:"required"`
+	Purpose       string `json:"purpose" binding:"required"`
+	VectorStoreID string `json:"vectorStoreID" binding:"required"`
+}
+
+// UploadResponse 用于stepfun API 上传文件到知识库。返回的文件id,知识库使用体积，知识库ID
+type UploadResponse struct {
+	ID            string `json:"id"`
+	UsageBytes    int    `json:"usage_bytes"`
+	VectorStoreID string `json:"vector_store_id"`
 }

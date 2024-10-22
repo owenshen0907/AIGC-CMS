@@ -5,28 +5,15 @@ import (
 	"fmt"
 	"net/http"
 	"openapi-cms/dbop"
+	"openapi-cms/models"
 
 	"github.com/gin-gonic/gin"
 	"github.com/sirupsen/logrus"
 )
 
-type TriggerUploadRequest struct {
-	ModelOwner    string `json:"model_owner" binding:"required"`
-	FileID        string `json:"file_id" binding:"required"`
-	Purpose       string `json:"purpose" binding:"required"`
-	VectorStoreID string `json:"vectorStoreID" binding:"required"`
-}
-
-// UploadResponse 用于解析外部 API 的响应
-type UploadResponse struct {
-	ID            string `json:"id"`
-	UsageBytes    int    `json:"usage_bytes"`
-	VectorStoreID string `json:"vector_store_id"`
-}
-
 // HandleTriggerExternalUpload 处理触发外部上传的请求
 func HandleTriggerExternalUpload(c *gin.Context, db *dbop.Database) {
-	var req TriggerUploadRequest
+	var req models.TriggerUploadRequest
 	if err := c.ShouldBindJSON(&req); err != nil {
 		logrus.Errorf("Invalid request parameters: %v", err)
 		c.JSON(http.StatusBadRequest, gin.H{"error": "Invalid request parameters"})
@@ -66,7 +53,7 @@ func HandleTriggerExternalUpload(c *gin.Context, db *dbop.Database) {
 			}
 
 			// 更新数据库中的 files 表，存储 API 返回的文件信息，增加 fileID
-			err = db.InsertFile(uploadResp.ID, uploadResp.VectorStoreID, uploadResp.UsageBytes, req.FileID, "retrieval")
+			err = db.InsertFile(uploadResp.ID, uploadResp.VectorStoreID, uploadResp.UsageBytes, req.FileID, "processing", "retrieval")
 			if err != nil {
 				logrus.Errorf("Error inserting file record to database: %v", err)
 				c.JSON(http.StatusInternalServerError, gin.H{"error": "Failed to insert file record"})
@@ -101,7 +88,7 @@ func HandleTriggerExternalUpload(c *gin.Context, db *dbop.Database) {
 			}
 
 			// 更新数据库中的 files 表，存储 API 返回的文件信息，增加 fileID
-			err = db.InsertFile(uploadResp.ID, req.VectorStoreID, uploadResp.UsageBytes, req.FileID, "file-extract")
+			err = db.InsertFile(uploadResp.ID, req.VectorStoreID, uploadResp.Bytes, req.FileID, "processing", "file-extract")
 			if err != nil {
 				logrus.Errorf("Error inserting file record to database: %v", err)
 				c.JSON(http.StatusInternalServerError, gin.H{"error": "Failed to insert file record"})
@@ -117,8 +104,8 @@ func HandleTriggerExternalUpload(c *gin.Context, db *dbop.Database) {
 			// 返回成功响应
 			c.JSON(http.StatusOK, gin.H{
 				"file_id":         req.FileID,
-				"status":          "File will be uploaded to StepFun",
-				"vector_store_id": uploadResp.VectorStoreID,
+				"status":          uploadResp.Status,
+				"vector_store_id": req.VectorStoreID,
 			})
 			return
 		}

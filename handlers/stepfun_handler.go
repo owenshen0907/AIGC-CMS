@@ -13,6 +13,7 @@ import (
 	"openapi-cms/tool"
 	"os"
 	"strings"
+	"time"
 
 	"github.com/gin-gonic/gin"
 	"github.com/sirupsen/logrus"
@@ -63,14 +64,20 @@ func HandleChatMessagesStepFun(db *dbop.Database) gin.HandlerFunc {
 				return
 			}
 		} else if payload.FileType == "file" && len(payload.FileIDs) > 0 {
-			// 处理文件消息
-			err = processUploadedFiles(db, payload, &userMessage, apiKey, c)
+			// 处理文件消息，把vector_file_id 放到数组里
+			err = processUploadedFiles(db, &payload, apiKey, c)
 			if err != nil {
 				// processUploadedFiles 已经处理了响应
 				return
 			}
+			// 构建用户消息
+			userMessage = models.StepFunMessage{
+				Role:    "user",
+				Content: payload.Query,
+			}
+
 		} else {
-			// 处理文本消息
+			// 构建用户消息
 			userMessage = models.StepFunMessage{
 				Role:    "user",
 				Content: payload.Query,
@@ -81,9 +88,11 @@ func HandleChatMessagesStepFun(db *dbop.Database) gin.HandlerFunc {
 		messages := []models.StepFunMessage{systemMessage, userMessage}
 
 		// 如果前端传了 vector_file_id，那么将文件内容解析并存入 messages 里
+		//fmt.Println("payload.VectorFileIds", payload.VectorFileIds)
 		if len(payload.VectorFileIds) > 0 {
 			insertIndex := 1
 			for _, vectorFileId := range payload.VectorFileIds {
+				fmt.Println("vectorFileId", vectorFileId)
 				fileContent := loadFileContent(c, vectorFileId, apiKey)
 				if fileContent != "" {
 					contentMessage := models.StepFunMessage{
@@ -101,49 +110,56 @@ func HandleChatMessagesStepFun(db *dbop.Database) gin.HandlerFunc {
 		//确认model
 		//payload.FileType="img" 输入token小于4k等于4k就选step-1v-8k。输入token大于4k小于等于31k就选step-1v-32k,大于31k就报错
 		//file_type不等于img,检查输入token,小于等于2k,就选step-1-flash。大于2k小于等于6k,就选step-1-8k。超过6k小于等于20k,就选step-1-32k。超过20k小于等于100k就选step-1-128k。超过100k小于等于200k就选step-1-256k。大于200k就报错。
-
-		// 计算 Token 数量
-		tokenCount, err := countTokens(apiKey, messages)
+		// 确认model
+		model, err := getModelName(apiKey, messages, payload.FileType)
 		if err != nil {
-			logrus.Printf("Error counting tokens: %v", err)
-			c.JSON(http.StatusInternalServerError, gin.H{"error": "Failed to count tokens"})
+			logrus.Printf("Error getting model name: %v", err)
+			c.JSON(http.StatusBadRequest, gin.H{"error": err.Error()})
 			return
 		}
+		//
+		//logrus.Printf("Selected model: %s", model)
+		//// 计算 Token 数量
+		//fmt.Println("messages", messages)
+		//tokenCount, err := countTokens(apiKey, messages)
+		//if err != nil {
+		//	logrus.Printf("Error counting tokens: %v", err)
+		//	c.JSON(http.StatusInternalServerError, gin.H{"error": "Failed to count tokens"})
+		//	return
+		//}
 		//tokenCount := 1000
 
-		logrus.Printf("Token count: %d", tokenCount)
-
 		// 根据 FileType 和 Token 数量选择模型
-		var model string
-		if payload.FileType == "img" {
-			if tokenCount <= 4000 {
-				model = "step-1v-8k"
-			} else if tokenCount <= 31000 {
-				model = "step-1v-32k"
-			} else {
-				logrus.Printf("Token count %d exceeds maximum for img FileType", tokenCount)
-				c.JSON(http.StatusBadRequest, gin.H{"error": "Token count exceeds maximum allowed for image file type"})
-				return
-			}
-		} else {
-			if tokenCount <= 2000 {
-				model = "step-1-flash"
-			} else if tokenCount <= 6000 {
-				model = "step-1-8k"
-			} else if tokenCount <= 20000 {
-				model = "step-1-32k"
-			} else if tokenCount <= 100000 {
-				model = "step-1-128k"
-			} else if tokenCount <= 200000 {
-				model = "step-1-256k"
-			} else {
-				logrus.Printf("Token count %d exceeds maximum for non-img FileType", tokenCount)
-				c.JSON(http.StatusBadRequest, gin.H{"error": "Token count exceeds maximum allowed"})
-				return
-			}
-		}
-
-		logrus.Printf("Selected model: %s", model)
+		//var model string
+		//if payload.FileType == "img" {
+		//	if tokenCount <= 4000 {
+		//		model = "step-1v-8k"
+		//	} else if tokenCount <= 31000 {
+		//		model = "step-1v-32k"
+		//	} else {
+		//		logrus.Printf("Token count %d exceeds maximum for img FileType", tokenCount)
+		//		c.JSON(http.StatusBadRequest, gin.H{"error": "Token count exceeds maximum allowed for image file type"})
+		//		return
+		//	}
+		//} else {
+		//	if tokenCount <= 2000 {
+		//		model = "step-1-flash"
+		//	} else if tokenCount <= 6000 {
+		//		model = "step-1-8k"
+		//	} else if tokenCount <= 20000 {
+		//		model = "step-1-32k"
+		//	} else if tokenCount <= 100000 {
+		//		model = "step-1-128k"
+		//	} else if tokenCount <= 200000 {
+		//		model = "step-1-256k"
+		//	} else {
+		//		logrus.Printf("Token count %d exceeds maximum for non-img FileType", tokenCount)
+		//		c.JSON(http.StatusBadRequest, gin.H{"error": "Token count exceeds maximum allowed"})
+		//		return
+		//	}
+		//}
+		//
+		//logrus.Printf("Selected model: %s", model)
 		// 构建 StepFunRequestPayload
 		stepFunRequest := models.StepFunRequestPayload{
 			Model:    model,
@@ -261,11 +277,100 @@ func HandleChatMessagesStepFun(db *dbop.Database) gin.HandlerFunc {
 	}
 }
 
+// getModelName 根据 FileType 和消息内容选择合适的模型
+func getModelName(apiKey string, messages []models.StepFunMessage, fileType string) (string, error) {
+	if fileType == "img" {
+		// 尝试使用 step-1v-8k
+		tokenCount, err := countTokens(apiKey, messages, "step-1v-8k")
+		if err != nil {
+			return "", fmt.Errorf("failed to count tokens with step-1v-8k: %w", err)
+		}
+		if tokenCount <= 5000 {
+			return "step-1v-8k", nil
+		} else if tokenCount > 25000 {
+			return "", fmt.Errorf("token count %d 超过了系统设定的最大25K的限制", tokenCount)
+		}
+
+		// 尝试使用 step-1v-32k
+		tokenCount, err = countTokens(apiKey, messages, "step-1v-32k")
+		if err != nil {
+			return "", fmt.Errorf("failed to count tokens with step-1v-32k: %w", err)
+		}
+		if tokenCount <= 25000 {
+			return "step-1v-32k", nil
+		}
+		return "", fmt.Errorf("token count %d exceeds maximum allowed for img FileType", tokenCount)
+	} else {
+		// 尝试使用 step-1-flash
+		tokenCount, err := countTokens(apiKey, messages, "step-1-flash")
+		if err != nil {
+			return "", fmt.Errorf("failed to count tokens with step-1-flash: %w", err)
+		}
+		if tokenCount <= 2000 {
+			return "step-1-flash", nil
+		}
+
+		// 尝试使用 step-1-8k
+		if tokenCount > 6000 {
+			fmt.Printf("token count %d 超过了系统设定的step-1-8k最大6K的输入限制，跳过计算tokens步骤", tokenCount)
+		} else {
+			tokenCount, err = countTokens(apiKey, messages, "step-1-8k")
+			if err != nil {
+				return "", fmt.Errorf("failed to count tokens with step-1-8k: %w", err)
+			}
+			if tokenCount <= 6000 {
+				return "step-1-8k", nil
+			}
+		}
+
+		// 尝试使用 step-1-32k
+		if tokenCount > 25000 {
+			fmt.Printf("token count %d 超过了系统设定的step-1-32k最大25K的输入限制，跳过计算tokens步骤", tokenCount)
+		} else {
+			tokenCount, err = countTokens(apiKey, messages, "step-1-32k")
+			if err != nil {
+				return "", fmt.Errorf("failed to count tokens with step-1-32k: %w", err)
+			}
+			if tokenCount <= 20000 {
+				return "step-1-32k", nil
+			}
+		}
+
+		// 尝试使用 step-1-128k
+		if tokenCount > 80000 {
+			fmt.Printf("token count %d 超过了系统设定的step-1-128k最大80K的输入限制，跳过计算tokens步骤", tokenCount)
+		} else {
+			tokenCount, err = countTokens(apiKey, messages, "step-1-128k")
+			if err != nil {
+				return "", fmt.Errorf("failed to count tokens with step-1-128k: %w", err)
+			}
+			if tokenCount <= 80000 {
+				return "step-1-128k", nil
+			}
+		}
+
+		// 尝试使用 step-1-256k
+		if tokenCount > 180000 {
+			fmt.Printf("token count %d 超过了系统设定的step-1-256k最大200K的输入限制，跳过计算tokens步骤", tokenCount)
+		} else {
+			tokenCount, err = countTokens(apiKey, messages, "step-1-256k")
+			if err != nil {
+				return "", fmt.Errorf("failed to count tokens with step-1-256k: %w", err)
+			}
+			if tokenCount <= 180000 {
+				return "step-1-256k", nil
+			}
+		}
+		return "", fmt.Errorf("token count exceeds maximum allowed for non-img FileType")
+	}
+}
+
 // countTokens 通过调用 StepFun 的 Token 计数 API 计算消息的 Token 数量
-func countTokens(apiKey string, messages []models.StepFunMessage) (int, error) {
+// 现在接收一个额外的参数 model，用于指定使用哪个模型来计数 tokens
+func countTokens(apiKey string, messages []models.StepFunMessage, model string) (int, error) {
 	// 定义请求负载
 	requestPayload := models.TokenCountRequest{
-		Model:    "step-1v-8k", // 初始模型，可以是任意默认模型
+		Model:    model, // 指定模型
 		Messages: messages,
 	}
 
@@ -301,6 +406,8 @@ func countTokens(apiKey string, messages []models.StepFunMessage) (int, error) {
 	if err != nil {
 		return 0, fmt.Errorf("failed to decode token count response: %w", err)
 	}
+	fmt.Printf("Model: %s", model)
+	fmt.Printf(";Token count: %d\n", tokenCountResp.Data.TotalTokens)
 
 	return tokenCountResp.Data.TotalTokens, nil
 }
@@ -392,7 +499,7 @@ func processImageMessages(db *dbop.Database, payload models.RequestPayload) (mod
 
 // processUploadedFiles 处理 FileType 为 "file" 且提供了 FileIDs 的文件上传逻辑。
 // 它包括从数据库检索文件记录、上传文件到 StepFun、更新文件状态，以及将 VectorFileId 添加到 payload 中。
-func processUploadedFiles(db *dbop.Database, payload models.RequestPayload, userMessage *models.StepFunMessage, apiKey string, c *gin.Context) error {
+func processUploadedFiles(db *dbop.Database, payload *models.RequestPayload, apiKey string, c *gin.Context) error {
 	for _, fileID := range payload.FileIDs {
 		// 通过 FileID 获取上传的文件记录
 		fileRecord, err := db.GetUploadedFileByID(fileID)
@@ -419,22 +526,31 @@ func processUploadedFiles(db *dbop.Database, payload models.RequestPayload, user
 			return err
 		}
 
+		// 开始轮询文件状态，每隔1秒查询一次，最多等待15秒
+		status, err := tool.PollFileStatus(uploadResp.ID, 15*time.Second)
+		if err != nil {
+			logrus.Errorf("查询文件解析状态时出错: %v", err)
+			return err
+		}
+		fmt.Printf("文件解析完成，状态: %s\n", status)
+
 		// 将上传后的文件信息插入到数据库中
-		err = db.InsertFile(uploadResp.ID, "local20241015145535", uploadResp.UsageBytes, fileID, "file-extract")
+		err = db.InsertFile(uploadResp.ID, "local20241015145535", uploadResp.Bytes, fileID, status, "file-extract")
 		if err != nil {
 			logrus.Errorf("将文件记录插入数据库时出错: %v", err)
 			c.JSON(http.StatusInternalServerError, gin.H{"error": "插入文件记录失败"})
 			return err
 		}
 
-		// 更新文件状态为 "completed"
+		// 更新文件状态为 "completed"表示上传的文件以及发给大模型结构进行解析
 		err = db.UpdateUploadedFileStatus(fileID, "completed")
 		if err != nil {
 			logrus.Errorf("更新文件状态为 'completed' 时出错: %v", err)
 			// 不返回错误，因为主流程可能仍需继续
 		}
+		//fmt.Print("uploadResp.VectorStoreID", uploadResp.ID)
 		// 将 VectorStoreID 添加到 payload 的 VectorFileIds 中
-		payload.VectorFileIds = append(payload.VectorFileIds, uploadResp.VectorStoreID)
+		payload.VectorFileIds = append(payload.VectorFileIds, uploadResp.ID)
 	}
 	return nil
 }

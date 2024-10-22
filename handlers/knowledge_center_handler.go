@@ -328,7 +328,7 @@ func HandleUpdateKnowledgeBase(c *gin.Context, db models.DatabaseInterface) {
 	})
 }
 
-// callStepFunAPI 封装了对 StepFun API 的调用逻辑
+// callStepFunAPI 封装了对 StepFun API 的调用逻辑-创建知识库
 func callStepFunAPI(c *gin.Context, payload struct {
 	Name        string `json:"name"`
 	DisplayName string `json:"display_name"`

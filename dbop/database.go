@@ -76,7 +76,7 @@ func NewDatabase() (*Database, error) {
 	}
 	database.insertVectorStoreStmt = insertStmt
 	// 准备插入文件的语句
-	fileInsertStmt, err := database.db.Prepare("INSERT INTO files (id, vector_store_id, usage_bytes, file_id,purpose) VALUES (?, ?, ?, ?,?)")
+	fileInsertStmt, err := database.db.Prepare("INSERT INTO files (id, vector_store_id, usage_bytes, file_id,status,purpose) VALUES (?, ?, ?, ?,?,?)")
 	if err != nil {
 		return nil, fmt.Errorf("failed to prepare file insert statement: %w", err)
 	}
@@ -262,9 +262,9 @@ func (d *Database) UpdateUploadedFileStatus(fileID, status string) error {
 }
 
 // InsertFile 插入文件记录
-func (d *Database) InsertFile(id, vectorStoreID string, usageBytes int, fileID, purpose string) error {
+func (d *Database) InsertFile(id, vectorStoreID string, usageBytes int, fileID, status, purpose string) error {
 	//query := "INSERT INTO files (id, vector_store_id, usage_bytes, file_id) VALUES (?, ?, ?, ?)"
-	_, err := d.insertFileStmt.Exec(id, vectorStoreID, usageBytes, fileID, purpose)
+	_, err := d.insertFileStmt.Exec(id, vectorStoreID, usageBytes, fileID, status, purpose)
 	if err != nil {
 		return fmt.Errorf("failed to insert file: %w", err)
 	}
