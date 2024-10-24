@@ -30,29 +30,23 @@ type DatabaseInterface interface {
 
 // RequestPayload 定义了，选择stepfun时，接收自前端的请求结构
 type RequestPayload struct {
-	Inputs         interface{} `json:"inputs,omitempty"`
-	Query          string      `json:"query,omitempty"`
-	ResponseMode   string      `json:"response_mode,omitempty"`
-	ConversationID string      `json:"conversation_id,omitempty"`
-	User           string      `json:"user,omitempty"`
-	//Files          []File      `json:"files,omitempty"`
-	FileIDs       []string `json:"file_ids,omitempty"`
-	FileType      string   `json:"file_type"`
-	Name          string   `json:"name"`
-	Description   string   `json:"description"`
-	Tags          string   `json:"tags"`            // 标签以逗号分隔的字符串
-	VectorStoreID string   `json:"vector_store_id"` // 新增字段，用于传递 vector_store_id
-	ModelOwner    string   `json:"model_owner"`     // 新增字段
-	WebSearch     bool     `json:"web_search"`
-	VectorFileIds []string `json:"vector_file_ids,omitempty"`
+	Inputs              interface{}      `json:"inputs,omitempty"`
+	SystemPrompt        string           `json:"system_prompt,omitempty"`
+	Query               string           `json:"query,omitempty"`
+	ResponseMode        string           `json:"response_mode,omitempty"`
+	ConversationID      string           `json:"conversation_id,omitempty"`
+	User                string           `json:"user,omitempty"`
+	FileIDs             []string         `json:"file_ids,omitempty"`
+	FileType            string           `json:"file_type"`
+	Name                string           `json:"name"`
+	Description         string           `json:"description"`
+	Tags                string           `json:"tags"`            // 标签以逗号分隔的字符串
+	VectorStoreID       string           `json:"vector_store_id"` // 新增字段，用于传递 vector_store_id
+	ModelOwner          string           `json:"model_owner"`     // 新增字段
+	WebSearch           bool             `json:"web_search"`
+	VectorFileIds       []string         `json:"vector_file_ids,omitempty"`
+	ConversationHistory []StepFunMessage `json:"conversation_history,omitempty"` //用于接收来自前端的消息历史
 }
-
-// File 定义文件结构
-//type File struct {
-//	Type           string `json:"type"`
-//	TransferMethod string `json:"transfer_method"`
-//	URL            string `json:"url"`
-//}
 
 // StepFunMessageContent 定义消息内容结构
 type StepFunMessageContent struct {
@@ -69,7 +63,7 @@ type StepFunMessageImageURL struct {
 
 // StepFunMessage 定义消息结构
 type StepFunMessage struct {
-	Role    string      `json:"role"`    // "system" 或 "user"
+	Role    string      `json:"role"`    // "system" "assistant"或 "user"
 	Content interface{} `json:"content"` // 对于 "system" 是字符串，对于 "user" 是 []StepFunMessageContent
 }
 
@@ -86,12 +80,25 @@ type StepFunTool struct {
 	Function StepFunToolFunction `json:"function"` // 工具的功能
 }
 
+// ResponseFormat 定义响应格式的结构
+type ResponseFormat struct {
+	Type string `json:"type"` // "text" 或 "json_object"
+}
+
 // StepFunRequestPayload 定义发送到 StepFun API 的请求结构
 type StepFunRequestPayload struct {
-	Model    string           `json:"model"`  // "step-1v-8k"
-	Stream   bool             `json:"stream"` // true
-	Messages []StepFunMessage `json:"messages"`
-	Tools    []StepFunTool    `json:"tools,omitempty"` // 新增字段，用于存储工具
+	Model            string           `json:"model"`  // "step-1v-8k"
+	Stream           bool             `json:"stream"` // true
+	Messages         []StepFunMessage `json:"messages"`
+	Tools            []StepFunTool    `json:"tools,omitempty"` // 聊天需要生成的标记最大数量，默认值为INF（不作限制，由模型自动决定）。输入标记和生成标记的总数量受限于指定模型的最大上下文长度。
+	ToolChoice       string           `json:"tool_choice,omitempty"`
+	MaxTokens        int              `json:"max_tokens,omitempty"`        // 新增字段，用于存储最大token数
+	Temperature      float64          `json:"temperature,omitempty"`       //采样温度，介于0.0和2.0之间的数字。较高值（如0.8）会使生成更随机，较低值（如0.2）会使其生成结果更集中且确定。默认值为0.5
+	TopP             float64          `json:"top_p,omitempty"`             //核心采样，该值会使模型生成具有top_p概率质量的标记并输出到结果。默认值为0.9
+	N                int              `json:"n,omitempty"`                 //控制模型为每个输入消息生成的响应消息结果条数，默认值为1，最大不限，建议不超过5
+	Stop             string           `json:"stop,omitempty"`              //用于指导模型生成聊天响应过程中，是否遇到stop中的内容，进行生成中断，默认为空
+	FrequencyPenalty float64          `json:"frequency_penalty,omitempty"` //默认为0。介于0.0和1.0之间的数字。值较高会使模型生成某token时，根据其过往在生成文本中出现的频度，进行后续降频惩罚，从而降低模型重复生成相同内容的可能性
+	ResponseFormat   ResponseFormat   `json:"response_format,omitempty"`   //用于指导模型输出特定格式的内容。默认为 {"type":"text"}，表示输出文本。设置为 { "type": "json_object" } 可以开启 JSON Mode，输出可解析的 JSON 结构。
 }
 
 // StepFunResponse 定义 StepFun API 的响应结构-创建知识库

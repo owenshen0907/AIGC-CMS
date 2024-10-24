@@ -50,7 +50,7 @@ func HandleChatMessagesStepFun(db *dbop.Database) gin.HandlerFunc {
 		// 系统消息
 		systemMessage := models.StepFunMessage{
 			Role:    "system",
-			Content: "你是由阶跃星辰为微信对话框提供的AI图像分析师，善于图片分析，可以分析图片中的文字，地址，建筑，人物，动物，食物，植物等结构清晰的物品。在输出结果的时候请将内容排版的美观，使其在微信中显示时易于阅读。请使用适当的换行和空行，不要包含 `\\n` 等符号。示例格式：",
+			Content: payload.SystemPrompt,
 		}
 
 		var userMessage models.StepFunMessage
@@ -85,7 +85,15 @@ func HandleChatMessagesStepFun(db *dbop.Database) gin.HandlerFunc {
 		}
 
 		// 构建初始消息列表
-		messages := []models.StepFunMessage{systemMessage, userMessage}
+		messages := []models.StepFunMessage{systemMessage}
+
+		// 如果有 conversation_history，则将其添加到消息列表中
+		if len(payload.ConversationHistory) > 0 {
+			messages = append(messages, payload.ConversationHistory...)
+		}
+
+		// 最后添加 userMessage
+		messages = append(messages, userMessage)
 
 		// 如果前端传了 vector_file_id，那么将文件内容解析并存入 messages 里
 		//fmt.Println("payload.VectorFileIds", payload.VectorFileIds)
@@ -117,54 +125,15 @@ func HandleChatMessagesStepFun(db *dbop.Database) gin.HandlerFunc {
 			c.JSON(http.StatusBadRequest, gin.H{"error": err.Error()})
 			return
 		}
-		//
-		//logrus.Printf("Selected model: %s", model)
-		//// 计算 Token 数量
-		//fmt.Println("messages", messages)
-		//tokenCount, err := countTokens(apiKey, messages)
-		//if err != nil {
-		//	logrus.Printf("Error counting tokens: %v", err)
-		//	c.JSON(http.StatusInternalServerError, gin.H{"error": "Failed to count tokens"})
-		//	return
-		//}
-		//tokenCount := 1000
 
-		// 根据 FileType 和 Token 数量选择模型
-		//var model string
-		//if payload.FileType == "img" {
-		//	if tokenCount <= 4000 {
-		//		model = "step-1v-8k"
-		//	} else if tokenCount <= 31000 {
-		//		model = "step-1v-32k"
-		//	} else {
-		//		logrus.Printf("Token count %d exceeds maximum for img FileType", tokenCount)
-		//		c.JSON(http.StatusBadRequest, gin.H{"error": "Token count exceeds maximum allowed for image file type"})
-		//		return
-		//	}
-		//} else {
-		//	if tokenCount <= 2000 {
-		//		model = "step-1-flash"
-		//	} else if tokenCount <= 6000 {
-		//		model = "step-1-8k"
-		//	} else if tokenCount <= 20000 {
-		//		model = "step-1-32k"
-		//	} else if tokenCount <= 100000 {
-		//		model = "step-1-128k"
-		//	} else if tokenCount <= 200000 {
-		//		model = "step-1-256k"
-		//	} else {
-		//		logrus.Printf("Token count %d exceeds maximum for non-img FileType", tokenCount)
-		//		c.JSON(http.StatusBadRequest, gin.H{"error": "Token count exceeds maximum allowed"})
-		//		return
-		//	}
-		//}
-		//
-		//logrus.Printf("Selected model: %s", model)
-		// 构建 StepFunRequestPayload
 		stepFunRequest := models.StepFunRequestPayload{
-			Model:    model,
-			Stream:   true,
-			Messages: messages,
+			Model:      model,
+			Stream:     true,
+			Messages:   messages,
+			ToolChoice: "auto",
+			ResponseFormat: models.ResponseFormat{
+				Type: "text", // 设置默认值为 "text"
+			},
 		}
 
 		// 构建工具列表
@@ -175,7 +144,7 @@ func HandleChatMessagesStepFun(db *dbop.Database) gin.HandlerFunc {
 			webSearchTool := models.StepFunTool{
 				Type: "web_search",
 				Function: models.StepFunToolFunction{
-					Description: "这个工具可以用来搜索互联网的信息",
+					Description: "这个工具web_search可以用来搜索互联网的信息",
 				},
 			}
 			tools = append(tools, webSearchTool)
