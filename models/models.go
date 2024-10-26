@@ -31,6 +31,7 @@ type DatabaseInterface interface {
 // RequestPayload 定义了，选择stepfun时，接收自前端的请求结构
 type RequestPayload struct {
 	Inputs              interface{}      `json:"inputs,omitempty"`
+	PerformanceLevel    string           `json:"performance_level,omitempty"`
 	SystemPrompt        string           `json:"system_prompt,omitempty"`
 	Query               string           `json:"query,omitempty"`
 	ResponseMode        string           `json:"response_mode,omitempty"`

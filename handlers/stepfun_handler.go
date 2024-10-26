@@ -119,7 +119,7 @@ func HandleChatMessagesStepFun(db *dbop.Database) gin.HandlerFunc {
 		//payload.FileType="img" 输入token小于4k等于4k就选step-1v-8k。输入token大于4k小于等于31k就选step-1v-32k,大于31k就报错
 		//file_type不等于img,检查输入token,小于等于2k,就选step-1-flash。大于2k小于等于6k,就选step-1-8k。超过6k小于等于20k,就选step-1-32k。超过20k小于等于100k就选step-1-128k。超过100k小于等于200k就选step-1-256k。大于200k就报错。
 		// 确认model
-		model, err := getModelName(apiKey, messages, payload.FileType)
+		model, err := getModelName(apiKey, messages, payload.FileType, payload.PerformanceLevel)
 		if err != nil {
 			logrus.Printf("Error getting model name: %v", err)
 			c.JSON(http.StatusBadRequest, gin.H{"error": err.Error()})
@@ -229,7 +229,7 @@ func HandleChatMessagesStepFun(db *dbop.Database) gin.HandlerFunc {
 				continue // 跳过空行
 			}
 			// 打印返回的报文
-			//logrus.Printf("StepFun 返回报文: %s", line)
+			logrus.Printf("StepFun 返回报文: %s", line)
 			// 发送数据到前端，确保 JSON 字符串未被转义
 			fmt.Fprintf(c.Writer, "%s\n\n", line)
 			// 刷新缓冲区
@@ -247,7 +247,8 @@ func HandleChatMessagesStepFun(db *dbop.Database) gin.HandlerFunc {
 }
 
 // getModelName 根据 FileType 和消息内容选择合适的模型
-func getModelName(apiKey string, messages []models.StepFunMessage, fileType string) (string, error) {
+func getModelName(apiKey string, messages []models.StepFunMessage, fileType, PerformanceLevel string) (string, error) {
+	//有图片的话不用判断技术模式
 	if fileType == "img" {
 		// 尝试使用 step-1v-8k
 		tokenCount, err := countTokens(apiKey, messages, "step-1v-8k")
@@ -257,9 +258,8 @@ func getModelName(apiKey string, messages []models.StepFunMessage, fileType stri
 		if tokenCount <= 5000 {
 			return "step-1v-8k", nil
 		} else if tokenCount > 25000 {
-			return "", fmt.Errorf("token count %d 超过了系统设定的最大25K的限制", tokenCount)
+			return "", fmt.Errorf("多摸分析，token count %d 超过了系统设定的step-1v-32k最大25K的输入限制", tokenCount)
 		}
-
 		// 尝试使用 step-1v-32k
 		tokenCount, err = countTokens(apiKey, messages, "step-1v-32k")
 		if err != nil {
@@ -268,69 +268,81 @@ func getModelName(apiKey string, messages []models.StepFunMessage, fileType stri
 		if tokenCount <= 25000 {
 			return "step-1v-32k", nil
 		}
-		return "", fmt.Errorf("token count %d exceeds maximum allowed for img FileType", tokenCount)
+		return "", fmt.Errorf("多摸分析，token count %d 超过了系统设定的step-1v-32k最大25K的输入限制", tokenCount)
 	} else {
-		// 尝试使用 step-1-flash
 		tokenCount, err := countTokens(apiKey, messages, "step-1-flash")
 		if err != nil {
 			return "", fmt.Errorf("failed to count tokens with step-1-flash: %w", err)
 		}
-		if tokenCount <= 2000 {
+		// 极速模式优先判断是否可以使用 step-1-flash
+		if PerformanceLevel == "fast" && tokenCount <= 10000 {
+			// 尝试使用 step-1-flash
 			return "step-1-flash", nil
-		}
 
-		// 尝试使用 step-1-8k
-		if tokenCount > 6000 {
-			fmt.Printf("token count %d 超过了系统设定的step-1-8k最大6K的输入限制，跳过计算tokens步骤", tokenCount)
-		} else {
-			tokenCount, err = countTokens(apiKey, messages, "step-1-8k")
+		}
+		// 高级模式优先判断是否可以使用 step-2-16k
+		if PerformanceLevel == "advanced" && tokenCount <= 12000 {
+			tokenCount, err = countTokens(apiKey, messages, "step-2-16k")
 			if err != nil {
-				return "", fmt.Errorf("failed to count tokens with step-1-8k: %w", err)
+				return "", fmt.Errorf("failed to count tokens with step-1v-32k: %w", err)
 			}
+			if tokenCount <= 12000 {
+				return "step-2-16k", nil
+			}
+		}
+		// 均衡模式优先判断是否可以使用 step-1-8k
+		if PerformanceLevel == "balanced" {
+			// 使用flash计算的tokenCount初步判断是否可以使用 step-1-8k
 			if tokenCount <= 6000 {
-				return "step-1-8k", nil
+				//确认基本符号后再精确计算tokens
+				tokenCount, err = countTokens(apiKey, messages, "step-1-8k")
+				if err != nil {
+					return "", fmt.Errorf("failed to count tokens with step-1-8k: %w", err)
+				}
+				//最终判断是否可用step-1-8k
+				if tokenCount <= 6000 {
+					return "step-1-8k", nil
+				}
 			}
-		}
-
-		// 尝试使用 step-1-32k
-		if tokenCount > 25000 {
-			fmt.Printf("token count %d 超过了系统设定的step-1-32k最大25K的输入限制，跳过计算tokens步骤", tokenCount)
-		} else {
-			tokenCount, err = countTokens(apiKey, messages, "step-1-32k")
-			if err != nil {
-				return "", fmt.Errorf("failed to count tokens with step-1-32k: %w", err)
+			// 使用flash计算的tokenCount初步判断是否可以使用 step-1-32k
+			if tokenCount <= 25000 {
+				//确认基本符号后再精确计算tokens
+				tokenCount, err = countTokens(apiKey, messages, "step-1-32k")
+				if err != nil {
+					return "", fmt.Errorf("failed to count tokens with step-1-32k: %w", err)
+				}
+				//最终判断是否可用step-1-32k
+				if tokenCount <= 25000 {
+					return "step-1-32k", nil
+				}
 			}
-			if tokenCount <= 20000 {
-				return "step-1-32k", nil
-			}
-		}
-
-		// 尝试使用 step-1-128k
-		if tokenCount > 80000 {
-			fmt.Printf("token count %d 超过了系统设定的step-1-128k最大80K的输入限制，跳过计算tokens步骤", tokenCount)
-		} else {
-			tokenCount, err = countTokens(apiKey, messages, "step-1-128k")
-			if err != nil {
-				return "", fmt.Errorf("failed to count tokens with step-1-128k: %w", err)
-			}
+			// 使用flash计算的tokenCount初步判断是否可以使用 step-1-128k
 			if tokenCount <= 80000 {
-				return "step-1-128k", nil
+				//确认基本符号后再精确计算tokens
+				tokenCount, err = countTokens(apiKey, messages, "step-1-128k")
+				if err != nil {
+					return "", fmt.Errorf("failed to count tokens with step-1-128k: %w", err)
+				}
+				//最终判断是否可用step-1-128k
+				if tokenCount <= 80000 {
+					return "step-1-128k", nil
+				}
 			}
-		}
-
-		// 尝试使用 step-1-256k
-		if tokenCount > 180000 {
-			fmt.Printf("token count %d 超过了系统设定的step-1-256k最大200K的输入限制，跳过计算tokens步骤", tokenCount)
-		} else {
-			tokenCount, err = countTokens(apiKey, messages, "step-1-256k")
-			if err != nil {
-				return "", fmt.Errorf("failed to count tokens with step-1-256k: %w", err)
-			}
+			// 使用flash计算的tokenCount初步判断是否可以使用 step-1-256k
 			if tokenCount <= 180000 {
-				return "step-1-256k", nil
+				//确认基本符号后再精确计算tokens
+				tokenCount, err = countTokens(apiKey, messages, "step-1-256k")
+				if err != nil {
+					return "", fmt.Errorf("failed to count tokens with step-1-256k: %w", err)
+				}
+				//最终判断是否可用step-1-256k
+				if tokenCount <= 180000 {
+					return "step-1-256k", nil
+				}
 			}
+
 		}
-		return "", fmt.Errorf("token count exceeds maximum allowed for non-img FileType")
+		return "", fmt.Errorf("文本会话会话补全，token count %d  查过了设定的180K的上限", tokenCount)
 	}
 }
 
