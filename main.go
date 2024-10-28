@@ -5,6 +5,7 @@ import (
 	"log"
 	"openapi-cms/dbop"
 	"openapi-cms/handlers"
+	"openapi-cms/middleware"
 	"openapi-cms/tool"
 	"os"
 
@@ -42,12 +43,15 @@ func main() {
 
 	// 配置 CORS 中间件
 	router.Use(cors.New(cors.Config{
-		AllowOrigins:     []string{"*"}, // 根据需要修改
+		AllowOrigins:     []string{"http://localhost:3000"}, // 根据需要修改
 		AllowMethods:     []string{"GET", "POST", "PUT", "DELETE", "OPTIONS"},
 		AllowHeaders:     []string{"Origin", "Content-Type", "Accept", "Authorization"},
 		ExposeHeaders:    []string{"Content-Length"},
 		AllowCredentials: true,
 	}))
+
+	// 应用 JWT 中间件到所有路由
+	router.Use(middleware.JWTMiddleware())
 
 	// 定义路由并注入依赖
 	api := router.Group("/api")
@@ -67,13 +71,13 @@ func main() {
 
 		// 获取数据，使用闭包传递 dbop
 		api.GET("/get-data", dbop.HandleGetData(db))
-		// 新增路由，获取某个知识库下的文件信息
+		// 获取某个知识库下的文件信息
 		api.GET("/knowledge-bases/:id/files", dbop.GetFilesByKnowledgeBaseID(db))
-		// 新增上传文件路由，使用闭包传递 dbop
+		// 上传文件
 		api.POST("/knowledge-uploads-file", func(c *gin.Context) {
 			tool.HandleUploadFile(c, db)
 		})
-		// 新增触发外部上传的路由，使用闭包传递 dbop（使用各模型厂商知识库）
+		// 触发外部上传（使用各模型厂商知识库）
 		api.POST("/trigger-external-upload", func(c *gin.Context) {
 			tool.HandleTriggerExternalUpload(c, db)
 		})
