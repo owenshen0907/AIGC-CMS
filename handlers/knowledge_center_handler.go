@@ -9,6 +9,7 @@ import (
 	"github.com/sirupsen/logrus"
 	"io"
 	"net/http"
+	"openapi-cms/middleware"
 	"openapi-cms/models"
 	"os"
 	"regexp"
@@ -25,6 +26,13 @@ func HandleCreateVectorStore(c *gin.Context, db models.DatabaseInterface) {
 		Tags        string `json:"tags"`
 		ModelOwner  string `json:"model_owner"` //所属模型：stepfun，zhipu，moonshot，baichuan，自定义（local)
 	}
+	userName, ok := middleware.GetUserName(c)
+	if !ok {
+		logrus.Warn("userName not found or invalid")
+		c.JSON(http.StatusUnauthorized, gin.H{"error": "Unauthorized"})
+		return
+	}
+	fmt.Println("****userName:", userName)
 
 	// 绑定 JSON 请求体到结构体
 	if err := c.ShouldBindJSON(&payload); err != nil {

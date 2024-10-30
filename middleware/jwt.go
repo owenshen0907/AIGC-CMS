@@ -52,3 +52,16 @@ func JWTMiddleware() gin.HandlerFunc {
 		}
 	}
 }
+
+// 获取 userName 的辅助函数
+func GetUserName(c *gin.Context) (string, bool) {
+	userName, exists := c.Get("userName")
+	if !exists {
+		return "", false
+	}
+	userNameStr, ok := userName.(string)
+	if !ok {
+		return "", false
+	}
+	return userNameStr, true
+}

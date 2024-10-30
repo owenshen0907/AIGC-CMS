@@ -3,9 +3,11 @@ package dbop
 
 import (
 	"database/sql"
+	"fmt"
 	"github.com/gin-gonic/gin"
 	"github.com/sirupsen/logrus"
 	"net/http"
+	"openapi-cms/middleware"
 	"openapi-cms/models"
 )
 
@@ -28,6 +30,13 @@ func HandleGetData(db *Database) gin.HandlerFunc {
 
 // getKnowledgeBases 获取知识库数据
 func getKnowledgeBases(c *gin.Context, db *Database) {
+	userName, ok := middleware.GetUserName(c)
+	if !ok {
+		logrus.Warn("userName not found or invalid")
+		c.JSON(http.StatusUnauthorized, gin.H{"error": "Unauthorized"})
+		return
+	}
+	fmt.Println("****userName:", userName)
 	query := "SELECT id, name,COALESCE(display_name,''), COALESCE(description,''), COALESCE(tags,''), created_at,model_owner,creator_id FROM vector_stores ORDER BY CASE WHEN model_owner = 'local' THEN 0 ELSE 1  END ASC, id ASC;"
 	rows, err := db.Query(query)
 	if err != nil {

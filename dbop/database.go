@@ -96,7 +96,8 @@ func (d *Database) createTables() error {
     tags VARCHAR(255),
     model_owner VARCHAR(255) NOT NULL,   -- 归属模型
     creator_id VARCHAR(255) NOT NULL,    -- 创建人ID
-    created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+    created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+	FOREIGN KEY (creator_id) REFERENCES users(username)
 )`
 	_, err := d.db.Exec(createVectorStoresTable)
 	if err != nil {

@@ -9,6 +9,7 @@ import (
 	"io/ioutil"
 	"net/http"
 	"openapi-cms/dbop"
+	"openapi-cms/middleware"
 	"openapi-cms/models"
 	"openapi-cms/tool"
 	"os"
@@ -19,8 +20,6 @@ import (
 	"github.com/sirupsen/logrus"
 )
 
-// 其他结构体定义保持不变，集中在 models.go 中
-
 // handleChatMessagesStepFun 处理 StepFun 聊天消息的请求
 func HandleChatMessagesStepFun(db *dbop.Database) gin.HandlerFunc {
 	return func(c *gin.Context) {
@@ -30,7 +29,13 @@ func HandleChatMessagesStepFun(db *dbop.Database) gin.HandlerFunc {
 			c.JSON(http.StatusBadRequest, gin.H{"error": "Invalid request payload"})
 			return
 		}
-
+		userName, ok := middleware.GetUserName(c)
+		if !ok {
+			logrus.Warn("userName not found or invalid")
+			c.JSON(http.StatusUnauthorized, gin.H{"error": "Unauthorized"})
+			return
+		}
+		fmt.Println("****userName:", userName)
 		// 打印收到的请求报文
 		reqBodyBytes, err := json.Marshal(payload)
 		if err != nil {
