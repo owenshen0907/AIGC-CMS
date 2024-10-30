@@ -2,6 +2,7 @@
 package dbop
 
 import (
+	"database/sql"
 	"github.com/gin-gonic/gin"
 	"github.com/sirupsen/logrus"
 	"net/http"
@@ -127,6 +128,22 @@ func GetFilesByKnowledgeBaseID(db *Database) gin.HandlerFunc {
 		// 返回文件数据
 		c.JSON(http.StatusOK, files)
 	}
+}
+
+// GetUserByUsername 根据用户名查询用户信息
+func GetUserByUsername(db *Database, username string) (*models.User, error) {
+	query := "SELECT id, username, password, created_at, updated_at FROM users WHERE username = ?"
+	row := db.db.QueryRow(query, username) // 使用 db.db.QueryRow 而不是 db.Query
+
+	var user models.User
+	err := row.Scan(&user.ID, &user.Username, &user.Password, &user.CreatedAt, &user.UpdatedAt)
+	if err != nil {
+		if err == sql.ErrNoRows {
+			return nil, nil // 用户不存在
+		}
+		return nil, err
+	}
+	return &user, nil
 }
 
 // getOtherData 获取其他数据

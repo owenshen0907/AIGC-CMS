@@ -2,13 +2,13 @@
 package middleware
 
 import (
+	"github.com/golang-jwt/jwt/v5"
 	"net/http"
 	"os"
 	// "strings"
 	"fmt"
 
 	"github.com/gin-gonic/gin"
-	"github.com/golang-jwt/jwt/v5" // 导入 JWT 包
 )
 
 func JWTMiddleware() gin.HandlerFunc {
@@ -16,7 +16,7 @@ func JWTMiddleware() gin.HandlerFunc {
 		tokenString, err := c.Cookie("jwtToken")
 		if err != nil {
 			fmt.Println("未找到 jwtToken Cookie:", err)
-			c.Redirect(http.StatusFound, "/login")
+			c.Redirect(http.StatusFound, os.Getenv("web_login_page"))
 			c.Abort()
 			return
 		}
@@ -35,18 +35,18 @@ func JWTMiddleware() gin.HandlerFunc {
 
 		if err != nil {
 			fmt.Println("JWT 令牌解析错误:", err)
-			c.Redirect(http.StatusFound, "/login")
+			c.Redirect(http.StatusFound, os.Getenv("web_login_page"))
 			c.Abort()
 			return
 		}
 
 		if claims, ok := token.Claims.(jwt.MapClaims); ok && token.Valid {
 			fmt.Println("JWT 令牌声明:", claims)
-			c.Set("userID", claims["userID"])
+			c.Set("userName", claims["userName"])
 			c.Next()
 		} else {
 			fmt.Println("无效的 JWT 令牌声明")
-			c.Redirect(http.StatusFound, "/login")
+			c.Redirect(http.StatusFound, os.Getenv("web_login_page"))
 			c.Abort()
 			return
 		}

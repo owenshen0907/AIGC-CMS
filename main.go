@@ -81,6 +81,8 @@ func main() {
 		api.POST("/trigger-external-upload", func(c *gin.Context) {
 			tool.HandleTriggerExternalUpload(c, db)
 		})
+		// 新增验证并返回用户名的路由
+		api.GET("/validate-user", handlers.HandleValidateUser(db))
 	}
 
 	// 监听端口
