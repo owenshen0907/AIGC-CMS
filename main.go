@@ -8,6 +8,7 @@ import (
 	"openapi-cms/middleware"
 	"openapi-cms/tool"
 	"os"
+	"strings"
 
 	"github.com/gin-contrib/cors"
 	"github.com/gin-gonic/gin"
@@ -30,6 +31,9 @@ func main() {
 		logrus.Infof("DIFY_API_KEY: %s", os.Getenv("DIFY_API_KEY"))
 		logrus.Infof("STEPFUN_API_KEY: %s", os.Getenv("STEPFUN_API_KEY"))
 	}
+	// 从环境变量中获取允许的来源
+	allowOrigins := os.Getenv("ALLOW_ORIGINS")
+	origins := strings.Split(allowOrigins, ",")
 
 	// 初始化数据库
 	db, err := dbop.NewDatabase()
@@ -43,7 +47,7 @@ func main() {
 
 	// 配置 CORS 中间件
 	router.Use(cors.New(cors.Config{
-		AllowOrigins:     []string{"http://localhost:3000"}, // 根据需要修改
+		AllowOrigins:     origins, // 根据需要修改
 		AllowMethods:     []string{"GET", "POST", "PUT", "DELETE", "OPTIONS"},
 		AllowHeaders:     []string{"Origin", "Content-Type", "Accept", "Authorization"},
 		ExposeHeaders:    []string{"Content-Length"},
