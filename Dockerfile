@@ -6,6 +6,7 @@ WORKDIR /app
 
 # 将 go.mod 和 go.sum 文件复制到工作目录，并下载依赖
 COPY go.mod go.sum ./
+ENV GOPROXY=https://goproxy.cn,direct
 RUN go mod download
 
 # 复制项目的全部代码到工作目录
@@ -16,6 +17,7 @@ RUN GOOS=linux GOARCH=amd64 go build -o main .
 
 # 使用一个更小的镜像来运行构建的应用程序
 FROM alpine:latest
+
 
 # 安装运行依赖
 RUN apk --no-cache add ca-certificates

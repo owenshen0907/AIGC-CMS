@@ -124,8 +124,8 @@ func (d *Database) createTables() error {
     id INT AUTO_INCREMENT PRIMARY KEY,              -- 自动生成的自增主键
     file_id VARCHAR(255) NOT NULL,              -- 文件ID
     knowledge_base_id VARCHAR(255) NOT NULL,    -- 知识库ID
-    FOREIGN KEY (file_id) REFERENCES uploaded_files(file_id) ON DELETE CASCADE,  -- 关联到上传的文件
-    FOREIGN KEY (knowledge_base_id) REFERENCES vector_stores(id) ON DELETE CASCADE  -- 关联到知识库
+   CONSTRAINT fk_file_knowledge_file FOREIGN KEY (file_id) REFERENCES uploaded_files(file_id) ON DELETE CASCADE,
+    CONSTRAINT fk_file_knowledge_vector_store FOREIGN KEY (knowledge_base_id) REFERENCES vector_stores(id) ON DELETE CASCADE
 )`
 	_, err = d.db.Exec(createFileKnowledgeRelationsTable)
 	if err != nil {
