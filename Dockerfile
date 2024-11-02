@@ -27,9 +27,6 @@ WORKDIR /app
 # 复制编译后的二进制文件到 /app 目录
 COPY --from=builder /app/main /app/main
 
-# 从主机直接复制 .env 文件到 /app 目录
-COPY .env /app/.env
-
 # 暴露端口
 EXPOSE 4000
 

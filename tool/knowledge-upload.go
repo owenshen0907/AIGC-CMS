@@ -3,16 +3,25 @@ package tool
 
 import (
 	"fmt"
+	"github.com/joho/godotenv"
 	"io"
 	"net/http"
-	"os"
-
 	"openapi-cms/dbop"
+	"os"
+	"path/filepath"
 
 	"github.com/gin-gonic/gin"
 	"github.com/google/uuid"
 	"github.com/sirupsen/logrus"
 )
+
+// 初始化加载环境变量（如果尚未在应用程序其他部分加载）
+func init() {
+	err := godotenv.Load()
+	if err != nil {
+		logrus.Warn("未能加载 .env 文件，使用系统环境变量")
+	}
+}
 
 // HandleUploadFile 处理上传文件的请求
 func HandleUploadFile(c *gin.Context, db *dbop.Database) {
@@ -53,9 +62,22 @@ func HandleUploadFile(c *gin.Context, db *dbop.Database) {
 		return
 	}
 	defer file.Close()
+	// 从环境变量中读取文件保存路径
+	uploadDir := os.Getenv("file_path")
+	if uploadDir == "" {
+		uploadDir = "./uploads" // 默认值（可选）
+		logrus.Warn("环境变量 'file_path' 未设置，使用默认路径 './uploads'")
+	}
 
-	// 保存文件到服务器本地
-	filePath := fmt.Sprintf("./uploads/%s", header.Filename) // 假设存储路径为 ./uploads/
+	// 确保上传目录存在
+	err = os.MkdirAll(uploadDir, os.ModePerm)
+	if err != nil {
+		logrus.Errorf("创建上传目录失败: %v", err)
+		c.JSON(http.StatusInternalServerError, gin.H{"error": "无法创建上传目录"})
+		return
+	}
+	// 使用 filepath.Join 组合文件路径，确保跨平台兼容性
+	filePath := filepath.Join(uploadDir, header.Filename)
 	out, err := os.Create(filePath)
 	if err != nil {
 		logrus.Errorf("Error saving the file: %v", err)
