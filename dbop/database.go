@@ -112,7 +112,9 @@ func (d *Database) createTables() error {
 		file_type VARCHAR(50) NOT NULL,             -- 文件类型
 		file_description TEXT,                      -- 文件描述
 		upload_time TIMESTAMP DEFAULT CURRENT_TIMESTAMP, -- 上传时间
-	    status VARCHAR(50) DEFAULT 'uploaded'        -- 文件状态
+	    status VARCHAR(50) DEFAULT 'uploaded',        -- 文件状态
+	    username VARCHAR(255),                       -- 上传者用户名
+	    FOREIGN KEY (username) REFERENCES users(username)     -- 外键约束
 	)`
 	_, err = d.db.Exec(createUploadFilesTable)
 	if err != nil {
@@ -226,12 +228,12 @@ func (d *Database) UpdateKnowledgeBase(name, displayName, description, tags stri
 }
 
 // InsertUploadedFileTx 在事务中向 uploaded_files 表插入一条记录
-func (d *Database) InsertUploadedFileTx(tx *sql.Tx, fileID, fileName, filePath, fileType, fileDescription string) error {
+func (d *Database) InsertUploadedFileTx(tx *sql.Tx, fileID, fileName, filePath, fileType, fileDescription, username string) error {
 	query := `
-		INSERT INTO uploaded_files (file_id, file_name, file_path, file_type, file_description, upload_time, status)
-		VALUES (?, ?, ?, ?, ?, NOW(), 'uploaded')
+		INSERT INTO uploaded_files (file_id, file_name, file_path, file_type, file_description, upload_time, status,username)
+		VALUES (?, ?, ?, ?, ?, NOW(), 'uploaded',?)
 	`
-	_, err := tx.Exec(query, fileID, fileName, filePath, fileType, fileDescription)
+	_, err := tx.Exec(query, fileID, fileName, filePath, fileType, fileDescription, username)
 	if err != nil {
 		return fmt.Errorf("InsertUploadedFileTx: %w", err)
 	}

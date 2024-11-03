@@ -22,7 +22,8 @@ type DatabaseInterface interface {
 	CommitTransaction(tx *sql.Tx) error
 	RollbackTransaction(tx *sql.Tx) error
 	// 新增事务内插入方法
-	InsertUploadedFileTx(tx *sql.Tx, fileID, fileName, filePath, fileType, fileDescription string) error
+	//上传文件，并记录文件信息
+	InsertUploadedFileTx(tx *sql.Tx, fileID, fileName, filePath, fileType, fileDescription, username string) error
 	InsertFileKnowledgeRelationTx(tx *sql.Tx, fileID, knowledgeBaseID string) error
 }
 

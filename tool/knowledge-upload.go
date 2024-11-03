@@ -1,4 +1,4 @@
-// tool/uploads.go
+// tool/knowledge-uploads.go
 package tool
 
 import (
@@ -7,8 +7,10 @@ import (
 	"io"
 	"net/http"
 	"openapi-cms/dbop"
+	"openapi-cms/middleware"
 	"os"
 	"path/filepath"
+	"time"
 
 	"github.com/gin-gonic/gin"
 	"github.com/google/uuid"
@@ -62,26 +64,41 @@ func HandleUploadFile(c *gin.Context, db *dbop.Database) {
 		return
 	}
 	defer file.Close()
+	// 从上下文中获取用户名
+	userName, exists := middleware.GetUserName(c)
+	if !exists || userName == "" {
+		logrus.Warn("未能获取用户名")
+		c.JSON(http.StatusUnauthorized, gin.H{"error": "Unauthorized: username not found"})
+		return
+	}
+
+	// 获取当前日期，格式为 YYYY-MM-DD
+	currentDate := time.Now().Format("2006-01-02")
+
 	// 从环境变量中读取文件保存路径
 	uploadDir := os.Getenv("file_path")
 	if uploadDir == "" {
 		uploadDir = "./uploads" // 默认值（可选）
 		logrus.Warn("环境变量 'file_path' 未设置，使用默认路径 './uploads'")
 	}
+	// 构建新的目标目录路径：uploadDir/username/currentDate
+	targetDir := filepath.Join(uploadDir, userName, currentDate)
 
 	// 确保上传目录存在
-	err = os.MkdirAll(uploadDir, os.ModePerm)
+	err = os.MkdirAll(targetDir, os.ModePerm)
 	if err != nil {
 		logrus.Errorf("创建上传目录失败: %v", err)
 		c.JSON(http.StatusInternalServerError, gin.H{"error": "无法创建上传目录"})
 		return
 	}
-	// 使用 filepath.Join 组合文件路径，确保跨平台兼容性
-	filePath := filepath.Join(uploadDir, header.Filename)
+	// 确保文件名安全，防止路径遍历
+	fileName := filepath.Base(header.Filename)
+	filePath := filepath.Join(targetDir, fileName)
+
 	out, err := os.Create(filePath)
 	if err != nil {
-		logrus.Errorf("Error saving the file: %v", err)
-		c.JSON(http.StatusInternalServerError, gin.H{"error": "Failed to save file"})
+		logrus.Errorf("Error creating the file: %v", err)
+		c.JSON(http.StatusInternalServerError, gin.H{"error": "Failed to creating file"})
 		return
 	}
 	defer out.Close()
@@ -120,8 +137,17 @@ func HandleUploadFile(c *gin.Context, db *dbop.Database) {
 			}
 		}
 	}()
+
+	// 计算相对于 uploadDir 的相对路径，例如 "username/2024-04-27/filename.ext"
+	relativeFilePath, err := filepath.Rel(uploadDir, filePath)
+	if err != nil {
+		logrus.Errorf("计算相对文件路径时出错: %v", err)
+		c.JSON(http.StatusInternalServerError, gin.H{"error": "路径处理错误"})
+		return
+	}
+
 	// 插入上传的文件信息到 uploaded_files 表中
-	err = db.InsertUploadedFileTx(tx, fileID, header.Filename, filePath, fileType, fileDescription)
+	err = db.InsertUploadedFileTx(tx, fileID, fileName, relativeFilePath, fileType, fileDescription, userName)
 	if err != nil {
 		logrus.Errorf("将上传文件记录插入数据库时出错: %v", err)
 		c.JSON(http.StatusInternalServerError, gin.H{"error": "无法存储文件信息"})
@@ -134,11 +160,14 @@ func HandleUploadFile(c *gin.Context, db *dbop.Database) {
 		c.JSON(http.StatusInternalServerError, gin.H{"error": "无法关联文件与知识库"})
 		return
 	}
+	file_web_host := os.Getenv("file_web_host")
+	file_web_path := fmt.Sprintf("%s%s", file_web_host, relativeFilePath)
 
 	// 返回成功响应
 	c.JSON(http.StatusOK, gin.H{
-		"file_id":   fileID,
-		"status":    "文件已成功保存并与知识库关联",
-		"file_path": filePath,
+		"file_id":       fileID,
+		"status":        "文件已成功保存并与知识库关联",
+		"file_path":     relativeFilePath,
+		"file_web_path": file_web_path,
 	})
 }
