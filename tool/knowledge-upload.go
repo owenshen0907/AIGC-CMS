@@ -27,7 +27,7 @@ func init() {
 
 // HandleUploadFile 处理上传文件的请求
 func HandleUploadFile(c *gin.Context, db *dbop.Database) {
-	file_web_host := os.Getenv("file_web_host")
+	file_web_host := os.Getenv("FILE_WEB_HOST")
 	// 从表单中获取，知识库id vector_store_id
 	vectorStoreID := c.PostForm("vector_store_id")
 	if vectorStoreID == "" {
@@ -99,10 +99,10 @@ func HandleUploadFile(c *gin.Context, db *dbop.Database) {
 	currentDate := time.Now().Format("2006-01-02")
 
 	// 从环境变量中读取文件保存路径
-	uploadDir := os.Getenv("file_path")
+	uploadDir := os.Getenv("FILE_PATH")
 	if uploadDir == "" {
 		uploadDir = "./uploads" // 默认值（可选）
-		logrus.Warn("环境变量 'file_path' 未设置，使用默认路径 './uploads'")
+		logrus.Warn("环境变量 'FILE_PATH' 未设置，使用默认路径 './uploads'")
 	}
 	// 构建新的目标目录路径：uploadDir/username/currentDate
 	targetDir := filepath.Join(uploadDir, userName, currentDate)

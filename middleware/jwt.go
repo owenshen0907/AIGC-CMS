@@ -16,7 +16,7 @@ func JWTMiddleware() gin.HandlerFunc {
 		tokenString, err := c.Cookie("jwtToken")
 		if err != nil {
 			fmt.Println("未找到 jwtToken Cookie:", err)
-			c.Redirect(http.StatusFound, os.Getenv("web_login_page"))
+			c.Redirect(http.StatusFound, os.Getenv("WEB_LOGIN_PAGE"))
 			c.Abort()
 			return
 		}
@@ -35,7 +35,7 @@ func JWTMiddleware() gin.HandlerFunc {
 
 		if err != nil {
 			fmt.Println("JWT 令牌解析错误:", err)
-			c.Redirect(http.StatusFound, os.Getenv("web_login_page"))
+			c.Redirect(http.StatusFound, os.Getenv("WEB_LOGIN_PAGE"))
 			c.Abort()
 			return
 		}
@@ -46,7 +46,7 @@ func JWTMiddleware() gin.HandlerFunc {
 			c.Next()
 		} else {
 			fmt.Println("无效的 JWT 令牌声明")
-			c.Redirect(http.StatusFound, os.Getenv("web_login_page"))
+			c.Redirect(http.StatusFound, os.Getenv("WEB_LOGIN_PAGE"))
 			c.Abort()
 			return
 		}

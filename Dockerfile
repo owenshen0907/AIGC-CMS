@@ -24,6 +24,9 @@ RUN apk --no-cache add ca-certificates
 # 设置工作目录
 WORKDIR /app
 
+# 创建 uploads 目录
+RUN mkdir -p /app/uploads
+
 # 复制编译后的二进制文件到 /app 目录
 COPY --from=builder /app/main /app/main
 
