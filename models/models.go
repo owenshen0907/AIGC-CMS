@@ -1,7 +1,9 @@
 // models.go
 package models
 
-import "database/sql"
+import (
+	"database/sql"
+)
 
 // DatabaseInterface 定义数据库操作接口
 type DatabaseInterface interface {
@@ -13,6 +15,7 @@ type DatabaseInterface interface {
 	UpdateKnowledgeBase(id, displayName, description, tags string) error
 	//InsertUploadedFile(fileID, fileName, filePath, fileType, fileDescription string) error
 	GetUploadedFileByID(fileID string) (*UploadedFile, error)
+	GetUploadedFileByFileNameSizeUsername(fileName, username string, fileSize int64) (*UploadedFile, error)
 	UpdateUploadedFileStatus(fileID, status string) error
 	InsertFile(id, vectorStoreID string, usageBytes int, fileID, status, purpose string) error
 	Query(query string, args ...interface{}) (*sql.Rows, error)
@@ -23,7 +26,7 @@ type DatabaseInterface interface {
 	RollbackTransaction(tx *sql.Tx) error
 	// 新增事务内插入方法
 	//上传文件，并记录文件信息
-	InsertUploadedFileTx(tx *sql.Tx, fileID, fileName, filePath, fileType, fileDescription, username string) error
+	InsertUploadedFileTx(tx *sql.Tx, fileID, fileName, filePath, fileType, fileDescription, username string, fileSize int64) error
 	InsertFileKnowledgeRelationTx(tx *sql.Tx, fileID, knowledgeBaseID string) error
 }
 
@@ -34,6 +37,7 @@ type RequestPayload struct {
 	Inputs              interface{}      `json:"inputs,omitempty"`
 	PerformanceLevel    string           `json:"performance_level,omitempty"`
 	SystemPrompt        string           `json:"system_prompt,omitempty"`
+	UserPrompt          StepFunMessage   `json:"user_prompt,omitempty"`
 	Query               string           `json:"query,omitempty"`
 	ResponseMode        string           `json:"response_mode,omitempty"`
 	ConversationID      string           `json:"conversation_id,omitempty"`
@@ -55,12 +59,18 @@ type StepFunMessageContent struct {
 	Type     string                  `json:"type"` // "text" 或 "image_url"
 	Text     string                  `json:"text,omitempty"`
 	ImageURL *StepFunMessageImageURL `json:"image_url,omitempty"`
+	VideoURL *StepFunMessageVideoURL `json:"video_url,omitempty"` // 新增视频URL结构
 }
 
 // StepFunMessageImageURL 定义图片 URL 结构
 type StepFunMessageImageURL struct {
 	URL    string `json:"url"`
 	Detail string `json:"detail"`
+}
+
+// StepFunMessageVideoURL 定义视频 URL 结构
+type StepFunMessageVideoURL struct {
+	URL string `json:"url"`
 }
 
 // StepFunMessage 定义消息结构
@@ -161,6 +171,8 @@ type UploadedFile struct {
 	Description string `json:"file_description"`
 	Status      string `json:"status"`
 	UploadTime  string `json:"upload_time"`
+	UserName    string `json:"username"`
+	FileSize    int    `json:"file_size"`
 }
 
 // FileStatusResponse 请求： StepFun API ,获取：doc parser上传文件的响应，和获取文件状态响应

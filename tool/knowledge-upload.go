@@ -27,6 +27,7 @@ func init() {
 
 // HandleUploadFile 处理上传文件的请求
 func HandleUploadFile(c *gin.Context, db *dbop.Database) {
+	file_web_host := os.Getenv("file_web_host")
 	// 从表单中获取，知识库id vector_store_id
 	vectorStoreID := c.PostForm("vector_store_id")
 	if vectorStoreID == "" {
@@ -63,6 +64,8 @@ func HandleUploadFile(c *gin.Context, db *dbop.Database) {
 		c.JSON(http.StatusBadRequest, gin.H{"error": "File is required"})
 		return
 	}
+	// 获取文件大小
+	fileSize := header.Size
 	defer file.Close()
 	// 从上下文中获取用户名
 	userName, exists := middleware.GetUserName(c)
@@ -71,7 +74,27 @@ func HandleUploadFile(c *gin.Context, db *dbop.Database) {
 		c.JSON(http.StatusUnauthorized, gin.H{"error": "Unauthorized: username not found"})
 		return
 	}
+	//判断是否文件已存在，如果已存在则直接返回已存在的文件信息，否则继续上传文件
+	uploadedFile, err := db.GetUploadedFileByFileNameSizeUsername(header.Filename, userName, fileSize)
+	if err != nil {
+		logrus.Errorf("Error retrieving the file: %v", err)
+		c.JSON(http.StatusBadRequest, gin.H{"error": "File is required"})
 
+	}
+	if uploadedFile == nil {
+		logrus.Info("文件不存在，继续处理上传")
+	} else {
+		// 返回成功响应
+		logrus.Info("此文件该用户已经上传，直接使用历史文件。")
+		file_web_path := fmt.Sprintf("%s%s", file_web_host, uploadedFile.FilePath)
+		c.JSON(http.StatusOK, gin.H{
+			"file_id":       uploadedFile.FileID,
+			"status":        "文件已成功保存并与知识库关联",
+			"file_path":     uploadedFile.FilePath,
+			"file_web_path": file_web_path,
+		})
+		return
+	}
 	// 获取当前日期，格式为 YYYY-MM-DD
 	currentDate := time.Now().Format("2006-01-02")
 
@@ -147,7 +170,7 @@ func HandleUploadFile(c *gin.Context, db *dbop.Database) {
 	}
 
 	// 插入上传的文件信息到 uploaded_files 表中
-	err = db.InsertUploadedFileTx(tx, fileID, fileName, relativeFilePath, fileType, fileDescription, userName)
+	err = db.InsertUploadedFileTx(tx, fileID, fileName, relativeFilePath, fileType, fileDescription, userName, fileSize)
 	if err != nil {
 		logrus.Errorf("将上传文件记录插入数据库时出错: %v", err)
 		c.JSON(http.StatusInternalServerError, gin.H{"error": "无法存储文件信息"})
@@ -160,7 +183,7 @@ func HandleUploadFile(c *gin.Context, db *dbop.Database) {
 		c.JSON(http.StatusInternalServerError, gin.H{"error": "无法关联文件与知识库"})
 		return
 	}
-	file_web_host := os.Getenv("file_web_host")
+
 	file_web_path := fmt.Sprintf("%s%s", file_web_host, relativeFilePath)
 
 	// 返回成功响应

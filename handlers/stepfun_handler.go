@@ -1,9 +1,9 @@
+// handlers/stepfun_handler.go
 package handlers
 
 import (
 	"bufio"
 	"bytes"
-	"encoding/base64"
 	"encoding/json"
 	"fmt"
 	"io/ioutil"
@@ -20,74 +20,48 @@ import (
 	"github.com/sirupsen/logrus"
 )
 
-// handleChatMessagesStepFun 处理 StepFun 聊天消息的请求
+// HandleChatMessagesStepFun 处理 StepFun 聊天消息的请求
 func HandleChatMessagesStepFun(db *dbop.Database) gin.HandlerFunc {
 	return func(c *gin.Context) {
 		var payload models.RequestPayload
 		if err := c.ShouldBindJSON(&payload); err != nil {
-			logrus.Printf("Error binding JSON: %v", err)
-			c.JSON(http.StatusBadRequest, gin.H{"error": "Invalid request payload"})
+			logrus.Printf("绑定 JSON 失败: %v", err)
+			c.JSON(http.StatusBadRequest, gin.H{"error": "无效的请求负载"})
 			return
 		}
+
 		userName, ok := middleware.GetUserName(c)
 		if !ok {
-			logrus.Warn("userName not found or invalid")
-			c.JSON(http.StatusUnauthorized, gin.H{"error": "Unauthorized"})
+			logrus.Warn("未找到或无效的 userName")
+			c.JSON(http.StatusUnauthorized, gin.H{"error": "未授权"})
 			return
 		}
-		fmt.Println("****userName:", userName)
+		logrus.Printf("****userName: %s", userName)
+
 		// 打印收到的请求报文
 		reqBodyBytes, err := json.Marshal(payload)
 		if err != nil {
-			logrus.Printf("Error marshaling request payload: %v", err)
-			c.JSON(http.StatusInternalServerError, gin.H{"error": "Server error"})
+			logrus.Printf("序列化请求负载失败: %v", err)
+			c.JSON(http.StatusInternalServerError, gin.H{"error": "服务器错误"})
 			return
 		}
 		logrus.Printf("StepFun 请求报文: %s", reqBodyBytes)
 
 		apiKey := os.Getenv("STEPFUN_API_KEY")
 		if apiKey == "" {
-			logrus.Println("STEPFUN_API_KEY is not set")
-			c.JSON(http.StatusInternalServerError, gin.H{"error": "Server configuration error"})
+			logrus.Println("未设置 STEPFUN_API_KEY")
+			c.JSON(http.StatusInternalServerError, gin.H{"error": "服务器配置错误"})
 			return
 		}
 
-		// 系统消息
+		// 构建系统消息
 		systemMessage := models.StepFunMessage{
 			Role:    "system",
 			Content: payload.SystemPrompt,
 		}
 
-		var userMessage models.StepFunMessage
-
-		if payload.FileType == "img" && len(payload.FileIDs) > 0 {
-			// 处理图片消息
-			userMessage, err = processImageMessages(db, payload)
-			if err != nil {
-				logrus.Printf("处理图片消息时出错: %v", err)
-				// 假设 processImageMessages 已经处理了响应
-				return
-			}
-		} else if payload.FileType == "file" && len(payload.FileIDs) > 0 {
-			// 处理文件消息，把vector_file_id 放到数组里
-			err = processUploadedFiles(db, &payload, apiKey, c)
-			if err != nil {
-				// processUploadedFiles 已经处理了响应
-				return
-			}
-			// 构建用户消息
-			userMessage = models.StepFunMessage{
-				Role:    "user",
-				Content: payload.Query,
-			}
-
-		} else {
-			// 构建用户消息
-			userMessage = models.StepFunMessage{
-				Role:    "user",
-				Content: payload.Query,
-			}
-		}
+		// 构建用户消息
+		userMessage := payload.UserPrompt
 
 		// 构建初始消息列表
 		messages := []models.StepFunMessage{systemMessage}
@@ -97,48 +71,49 @@ func HandleChatMessagesStepFun(db *dbop.Database) gin.HandlerFunc {
 			messages = append(messages, payload.ConversationHistory...)
 		}
 
-		// 最后添加 userMessage
-		messages = append(messages, userMessage)
+		// 如果 file_type 为 "file" 且有 file_ids，则处理上传的文件并添加文件内容
+		if payload.FileType == "file" && len(payload.FileIDs) > 0 {
+			err = processUploadedFiles(db, &payload, apiKey, c)
+			if err != nil {
+				// processUploadedFiles 已经处理了响应
+				return
+			}
 
-		// 如果前端传了 vector_file_id，那么将文件内容解析并存入 messages 里
-		//fmt.Println("payload.VectorFileIds", payload.VectorFileIds)
-		if len(payload.VectorFileIds) > 0 {
-			insertIndex := 1
+			// 遍历 VectorFileIds，加载文件内容并添加到 messages 中
 			for _, vectorFileId := range payload.VectorFileIds {
-				fmt.Println("vectorFileId", vectorFileId)
 				fileContent := loadFileContent(c, vectorFileId, apiKey)
 				if fileContent != "" {
 					contentMessage := models.StepFunMessage{
-						Role:    "user",
-						Content: fileContent,
+						Role: "user",
+						Content: []models.StepFunMessageContent{
+							{
+								Type: "text",
+								Text: fileContent,
+							},
+						},
 					}
-					// 在指定位置插入 contentMessage
-					messages = append(messages[:insertIndex], append([]models.StepFunMessage{contentMessage}, messages[insertIndex:]...)...)
-					// 每次插入后，插入位置增加 2
-					insertIndex += 2
+					messages = append(messages, contentMessage)
 				}
 			}
 		}
 
-		//确认model
-		//payload.FileType="img" 输入token小于4k等于4k就选step-1v-8k。输入token大于4k小于等于31k就选step-1v-32k,大于31k就报错
-		//file_type不等于img,检查输入token,小于等于2k,就选step-1-flash。大于2k小于等于6k,就选step-1-8k。超过6k小于等于20k,就选step-1-32k。超过20k小于等于100k就选step-1-128k。超过100k小于等于200k就选step-1-256k。大于200k就报错。
-		// 确认model
+		// 最后添加 userMessage
+		messages = append(messages, userMessage)
+
+		// 确认模型
 		model, err := getModelName(apiKey, messages, payload.FileType, payload.PerformanceLevel)
 		if err != nil {
-			logrus.Printf("Error getting model name: %v", err)
+			logrus.Printf("获取模型名称失败: %v", err)
 			c.JSON(http.StatusBadRequest, gin.H{"error": err.Error()})
 			return
 		}
 
 		stepFunRequest := models.StepFunRequestPayload{
-			Model:      model,
-			Stream:     true,
-			Messages:   messages,
-			ToolChoice: "auto",
-			ResponseFormat: models.ResponseFormat{
-				Type: "text", // 设置默认值为 "text"
-			},
+			Model:          model,
+			Stream:         true,
+			Messages:       messages,
+			ToolChoice:     "auto",
+			ResponseFormat: models.ResponseFormat{Type: "text"}, // 默认值为 "text"
 		}
 
 		// 构建工具列表
@@ -149,7 +124,7 @@ func HandleChatMessagesStepFun(db *dbop.Database) gin.HandlerFunc {
 			webSearchTool := models.StepFunTool{
 				Type: "web_search",
 				Function: models.StepFunToolFunction{
-					Description: "这个工具web_search可以用来搜索互联网的信息",
+					Description: "这个工具 web_search 可以用来搜索互联网的信息",
 				},
 			}
 			tools = append(tools, webSearchTool)
@@ -162,34 +137,35 @@ func HandleChatMessagesStepFun(db *dbop.Database) gin.HandlerFunc {
 				Function: models.StepFunToolFunction{
 					Description: payload.Description,
 					Options: map[string]string{
-						"vector_store_id": payload.VectorStoreID, // 从前端传递的 vector_store_id
-						"prompt_template": "从文档 {{knowledge}} 中找到问题 {{query}} 的答案。根据文档内容中的语句找到答案，如果文档中没用答案则告诉用户找不到相关信息；",
+						"vector_store_id": payload.VectorStoreID,
+						"prompt_template": "从文档 {{knowledge}} 中找到问题 {{query}} 的答案。根据文档内容中的语句找到答案，如果文档中没有答案则告诉用户找不到相关信息；",
 					},
 				},
 			}
 			tools = append(tools, retrievalTool)
 		} else {
-			logrus.Println("vector_store_id not provided, skipping retrieval tool")
+			logrus.Println("未提供 vector_store_id，跳过 retrieval 工具")
 		}
 
 		// 将工具添加到请求中
 		stepFunRequest.Tools = tools
+
 		// 将请求体编码为 JSON
 		stepFunReqBodyBytes, err := json.Marshal(stepFunRequest)
 		if err != nil {
-			logrus.Printf("Error marshaling StepFun request payload: %v", err)
-			c.JSON(http.StatusInternalServerError, gin.H{"error": "Server error"})
+			logrus.Printf("序列化 StepFun 请求负载失败: %v", err)
+			c.JSON(http.StatusInternalServerError, gin.H{"error": "服务器错误"})
 			return
 		}
 
 		// 打印发送给 StepFun API 的请求报文
-		//logrus.Printf("StepFun API 请求报文: %s", stepFunReqBodyBytes)
-		fmt.Printf("StepFun API 请求报文: %s", stepFunReqBodyBytes)
+		logrus.Printf("StepFun API 请求报文: %s", stepFunReqBodyBytes)
+
 		// 创建向 StepFun API 发送的 HTTP 请求
 		stepFunReq, err := http.NewRequest("POST", "https://api.stepfun.com/v1/chat/completions", bytes.NewBuffer(stepFunReqBodyBytes))
 		if err != nil {
-			logrus.Printf("Error creating request: %v", err)
-			c.JSON(http.StatusInternalServerError, gin.H{"error": "Server error"})
+			logrus.Printf("创建请求失败: %v", err)
+			c.JSON(http.StatusInternalServerError, gin.H{"error": "服务器错误"})
 			return
 		}
 
@@ -201,8 +177,8 @@ func HandleChatMessagesStepFun(db *dbop.Database) gin.HandlerFunc {
 		client := &http.Client{}
 		resp, err := client.Do(stepFunReq)
 		if err != nil {
-			logrus.Printf("Error sending request to StepFun API: %v", err)
-			c.JSON(http.StatusInternalServerError, gin.H{"error": "Failed to communicate with StepFun API"})
+			logrus.Printf("发送请求到 StepFun API 失败: %v", err)
+			c.JSON(http.StatusInternalServerError, gin.H{"error": "无法与 StepFun API 通信"})
 			return
 		}
 		defer resp.Body.Close()
@@ -216,8 +192,8 @@ func HandleChatMessagesStepFun(db *dbop.Database) gin.HandlerFunc {
 					errorText += scanner.Text()
 				}
 			}
-			logrus.Printf("StepFun API returned status: %s, message: %s", resp.Status, errorText)
-			c.JSON(resp.StatusCode, gin.H{"error": "StepFun API error"})
+			logrus.Printf("StepFun API 返回状态: %s, 信息: %s", resp.Status, errorText)
+			c.JSON(resp.StatusCode, gin.H{"error": "StepFun API 错误"})
 			return
 		}
 
@@ -242,8 +218,8 @@ func HandleChatMessagesStepFun(db *dbop.Database) gin.HandlerFunc {
 		}
 
 		if err := scanner.Err(); err != nil {
-			logrus.Printf("Error reading response from StepFun API: %v", err)
-			c.JSON(http.StatusInternalServerError, gin.H{"error": "Failed to read StepFun response"})
+			logrus.Printf("读取 StepFun API 响应时出错: %v", err)
+			c.JSON(http.StatusInternalServerError, gin.H{"error": "读取 StepFun 响应失败"})
 			return
 		}
 
@@ -252,41 +228,44 @@ func HandleChatMessagesStepFun(db *dbop.Database) gin.HandlerFunc {
 }
 
 // getModelName 根据 FileType 和消息内容选择合适的模型
-func getModelName(apiKey string, messages []models.StepFunMessage, fileType, PerformanceLevel string) (string, error) {
-	//有图片的话不用判断技术模式
+func getModelName(apiKey string, messages []models.StepFunMessage, fileType, performanceLevel string) (string, error) {
 	if fileType == "img" {
 		// 尝试使用 step-1v-8k
 		tokenCount, err := countTokens(apiKey, messages, "step-1v-8k")
 		if err != nil {
-			return "", fmt.Errorf("failed to count tokens with step-1v-8k: %w", err)
+			return "", fmt.Errorf("计算 step-1v-8k 的 token 数量失败: %w", err)
 		}
 		if tokenCount <= 5000 {
 			return "step-1v-8k", nil
 		} else if tokenCount > 25000 {
-			return "", fmt.Errorf("多摸分析，token count %d 超过了系统设定的step-1v-32k最大25K的输入限制", tokenCount)
+			return "", fmt.Errorf("token 数量 %d 超过了 step-1v-32k 的最大限制 25K", tokenCount)
 		}
+
 		// 尝试使用 step-1v-32k
 		tokenCount, err = countTokens(apiKey, messages, "step-1v-32k")
 		if err != nil {
-			return "", fmt.Errorf("failed to count tokens with step-1v-32k: %w", err)
+			return "", fmt.Errorf("计算 step-1v-32k 的 token 数量失败: %w", err)
 		}
 		if tokenCount <= 25000 {
 			return "step-1v-32k", nil
 		}
-		return "", fmt.Errorf("多摸分析，token count %d 超过了系统设定的step-1v-32k最大25K的输入限制", tokenCount)
+		return "", fmt.Errorf("token 数量 %d 超过了 step-1v-32k 的最大限制 25K", tokenCount)
+	}
+	if fileType == "video" {
+		return "step-1.5v-mini", nil
 	} else {
 		tokenCount, err := countTokens(apiKey, messages, "step-1-flash")
 		if err != nil {
 			return "", fmt.Errorf("failed to count tokens with step-1-flash: %w", err)
 		}
 		// 极速模式优先判断是否可以使用 step-1-flash
-		if PerformanceLevel == "fast" && tokenCount <= 10000 {
+		if performanceLevel == "fast" && tokenCount <= 10000 {
 			// 尝试使用 step-1-flash
 			return "step-1-flash", nil
 
 		}
 		// 高级模式优先判断是否可以使用 step-2-16k
-		if PerformanceLevel == "advanced" && tokenCount <= 12000 {
+		if performanceLevel == "advanced" && tokenCount <= 12000 {
 			tokenCount, err = countTokens(apiKey, messages, "step-2-16k")
 			if err != nil {
 				return "", fmt.Errorf("failed to count tokens with step-1v-32k: %w", err)
@@ -296,7 +275,7 @@ func getModelName(apiKey string, messages []models.StepFunMessage, fileType, Per
 			}
 		}
 		// 均衡模式优先判断是否可以使用 step-1-8k
-		if PerformanceLevel == "balanced" {
+		if performanceLevel == "balanced" {
 			// 使用flash计算的tokenCount初步判断是否可以使用 step-1-8k
 			if tokenCount <= 6000 {
 				//确认基本符号后再精确计算tokens
@@ -352,145 +331,50 @@ func getModelName(apiKey string, messages []models.StepFunMessage, fileType, Per
 }
 
 // countTokens 通过调用 StepFun 的 Token 计数 API 计算消息的 Token 数量
-// 现在接收一个额外的参数 model，用于指定使用哪个模型来计数 tokens
 func countTokens(apiKey string, messages []models.StepFunMessage, model string) (int, error) {
-	// 定义请求负载
 	requestPayload := models.TokenCountRequest{
-		Model:    model, // 指定模型
+		Model:    model,
 		Messages: messages,
 	}
 
-	// 编码为 JSON
 	reqBodyBytes, err := json.Marshal(requestPayload)
 	if err != nil {
-		return 0, fmt.Errorf("failed to marshal token count request: %w", err)
+		return 0, fmt.Errorf("序列化 token 计数请求失败: %w", err)
 	}
 
-	// 设置请求头
 	headers := map[string]string{
 		"Authorization": fmt.Sprintf("Bearer %s", apiKey),
 		"Content-Type":  "application/json",
 	}
 
-	// 使用 SendStepFunRequest 发送请求
 	resp, err := SendStepFunRequest("POST", "https://api.stepfun.com/v1/token/count", headers, bytes.NewBuffer(reqBodyBytes))
 	if err != nil {
-		return 0, fmt.Errorf("failed to send token count request: %w", err)
+		return 0, fmt.Errorf("发送 token 计数请求失败: %w", err)
 	}
 	defer resp.Body.Close()
 
-	// 检查响应状态
 	if resp.StatusCode != http.StatusOK {
-		// 读取错误信息
 		bodyBytes, _ := ioutil.ReadAll(resp.Body)
-		return 0, fmt.Errorf("token count API error: %s", string(bodyBytes))
+		return 0, fmt.Errorf("token 计数 API 错误: %s", string(bodyBytes))
 	}
 
-	// 解码响应
 	var tokenCountResp models.TokenCountResponse
 	err = json.NewDecoder(resp.Body).Decode(&tokenCountResp)
 	if err != nil {
-		return 0, fmt.Errorf("failed to decode token count response: %w", err)
+		return 0, fmt.Errorf("解析 token 计数响应失败: %w", err)
 	}
-	fmt.Printf("Model: %s", model)
-	fmt.Printf(";Token count: %d\n", tokenCountResp.Data.TotalTokens)
+	logrus.Printf("模型: %s; Token 数量: %d", model, tokenCountResp.Data.TotalTokens)
 
 	return tokenCountResp.Data.TotalTokens, nil
 }
 
-func loadFileContent(c *gin.Context, VectorFileId, apiKey string) string {
-	fileContentURL := fmt.Sprintf("https://api.stepfun.com/v1/files/%s/content", VectorFileId)
-	req, err := http.NewRequest("GET", fileContentURL, nil)
-	if err != nil {
-		logrus.Printf("Error creating file content request: %v", err)
-		c.JSON(http.StatusInternalServerError, gin.H{"error": "Server error"})
-		return ""
-	}
-	req.Header.Set("Authorization", fmt.Sprintf("Bearer %s", apiKey))
-	// Send the request
-	client := &http.Client{}
-	resp, err := client.Do(req)
-	if err != nil {
-		logrus.Printf("Error sending file content request: %v", err)
-		c.JSON(http.StatusInternalServerError, gin.H{"error": "Failed to retrieve file content"})
-		return ""
-	}
-	defer resp.Body.Close()
-
-	// Check response status
-	if resp.StatusCode != http.StatusOK {
-		logrus.Printf("Failed to retrieve file content, status code: %d", resp.StatusCode)
-		c.JSON(http.StatusInternalServerError, gin.H{"error": "Failed to retrieve file content"})
-		return ""
-	}
-
-	// Read the response body
-	fileContentBytes, err := ioutil.ReadAll(resp.Body)
-	if err != nil {
-		logrus.Printf("Error reading file content response: %v", err)
-		c.JSON(http.StatusInternalServerError, gin.H{"error": "Failed to read file content"})
-		return ""
-	}
-	// Store the file content
-	return string(fileContentBytes)
-}
-
-// processImageMessages 处理图片消息，通过读取和编码图片文件来构建消息内容。
-func processImageMessages(db *dbop.Database, payload models.RequestPayload) (models.StepFunMessage, error) {
-	var content []models.StepFunMessageContent
-	for _, fileID := range payload.FileIDs {
-		// 通过 FileID 获取上传的文件记录
-		uploadedFile, err := db.GetUploadedFileByID(fileID)
-		if err != nil {
-			logrus.Printf("检索上传文件时出错: %v", err)
-			return models.StepFunMessage{}, fmt.Errorf("无法检索上传文件")
-		}
-		if uploadedFile == nil {
-			logrus.Printf("未找到 FileID 为 %s 的上传文件", fileID)
-			return models.StepFunMessage{}, fmt.Errorf("未找到 FileID 为 %s 的上传文件", fileID)
-		}
-
-		// 读取并进行 Base64 编码
-		imageData, err := ioutil.ReadFile(uploadedFile.FilePath)
-		if err != nil {
-			logrus.Printf("读取图片文件时出错: %v", err)
-			return models.StepFunMessage{}, fmt.Errorf("读取图片文件失败")
-		}
-		encodedImage := base64.StdEncoding.EncodeToString(imageData)
-		imageURL := fmt.Sprintf("data:%s;base64,%s", uploadedFile.FileType, encodedImage)
-
-		// 构建图片消息内容
-		imageContent := models.StepFunMessageContent{
-			Type: "image_url",
-			ImageURL: &models.StepFunMessageImageURL{
-				URL:    imageURL,
-				Detail: "high",
-			},
-		}
-		content = append(content, imageContent)
-	}
-
-	// 添加来自 payload 查询的文本内容
-	textContent := models.StepFunMessageContent{
-		Type: "text",
-		Text: payload.Query,
-	}
-	content = append(content, textContent)
-
-	return models.StepFunMessage{
-		Role:    "user",
-		Content: content,
-	}, nil
-}
-
 // processUploadedFiles 处理 FileType 为 "file" 且提供了 FileIDs 的文件上传逻辑。
-// 它包括从数据库检索文件记录、上传文件到 StepFun、更新文件状态，以及将 VectorFileId 添加到 payload 中。
 func processUploadedFiles(db *dbop.Database, payload *models.RequestPayload, apiKey string, c *gin.Context) error {
 	for _, fileID := range payload.FileIDs {
-		// 通过 FileID 获取上传的文件记录
+		// 获取上传的文件记录
 		fileRecord, err := db.GetUploadedFileByID(fileID)
 		if err != nil {
-			logrus.Errorf("从数据库检索文件记录时出错: %v", err)
+			logrus.Errorf("检索文件记录失败: %v", err)
 			c.JSON(http.StatusInternalServerError, gin.H{"error": "无法检索文件信息"})
 			return err
 		}
@@ -499,54 +383,91 @@ func processUploadedFiles(db *dbop.Database, payload *models.RequestPayload, api
 			c.JSON(http.StatusBadRequest, gin.H{"error": "上传的文件未找到"})
 			return fmt.Errorf("未找到 FileID 为 %s 的上传文件", fileID)
 		}
-
-		// 将文件上传到 StepFun 并进行提取
-		uploadResp, err := tool.UploadFileToStepFunWithExtract(fileRecord.FilePath, fileRecord.Filename)
+		//将文件根目录，文件路径拼接起来
+		filePath := fmt.Sprintf("%s/%s", os.Getenv("file_path"), fileRecord.FilePath)
+		// 上传文件到 StepFun 并进行提取
+		uploadResp, err := tool.UploadFileToStepFunWithExtract(filePath, fileRecord.Filename)
 		if err != nil {
-			logrus.Errorf("上传文件到 StepFun 时出错: %v", err)
+			logrus.Errorf("上传文件到 StepFun 失败: %v", err)
 			// 更新文件状态为 "failed"
 			if updateErr := db.UpdateUploadedFileStatus(fileID, "failed"); updateErr != nil {
-				logrus.Errorf("更新文件状态为 'failed' 时出错: %v", updateErr)
+				logrus.Errorf("更新文件状态为 'failed' 失败: %v", updateErr)
 			}
 			c.JSON(http.StatusInternalServerError, gin.H{"error": "文件上传失败"})
 			return err
 		}
 
-		// 开始轮询文件状态，每隔1秒查询一次，最多等待15秒
+		// 轮询文件状态
 		status, err := tool.PollFileStatus(uploadResp.ID, 15*time.Second)
 		if err != nil {
-			logrus.Errorf("查询文件解析状态时出错: %v", err)
+			logrus.Errorf("查询文件解析状态失败: %v", err)
 			return err
 		}
-		fmt.Printf("文件解析完成，状态: %s\n", status)
+		logrus.Printf("文件解析完成，状态: %s", status)
 
-		// 将上传后的文件信息插入到数据库中
+		// 插入文件信息到数据库
 		err = db.InsertFile(uploadResp.ID, "local20241015145535", uploadResp.Bytes, fileID, status, "file-extract")
 		if err != nil {
-			logrus.Errorf("将文件记录插入数据库时出错: %v", err)
+			logrus.Errorf("插入文件记录到数据库失败: %v", err)
 			c.JSON(http.StatusInternalServerError, gin.H{"error": "插入文件记录失败"})
 			return err
 		}
 
-		// 更新文件状态为 "completed"表示上传的文件以及发给大模型结构进行解析
+		// 更新文件状态为 "completed"
 		err = db.UpdateUploadedFileStatus(fileID, "completed")
 		if err != nil {
-			logrus.Errorf("更新文件状态为 'completed' 时出错: %v", err)
+			logrus.Errorf("更新文件状态为 'completed' 失败: %v", err)
 			// 不返回错误，因为主流程可能仍需继续
 		}
-		//fmt.Print("uploadResp.VectorStoreID", uploadResp.ID)
+
 		// 将 VectorStoreID 添加到 payload 的 VectorFileIds 中
 		payload.VectorFileIds = append(payload.VectorFileIds, uploadResp.ID)
 	}
 	return nil
 }
 
-// sendStepFunRequest 通用的 HTTP 请求发送函数
+// loadFileContent 加载文件内容
+func loadFileContent(c *gin.Context, vectorFileId, apiKey string) string {
+	fileContentURL := fmt.Sprintf("https://api.stepfun.com/v1/files/%s/content", vectorFileId)
+	req, err := http.NewRequest("GET", fileContentURL, nil)
+	if err != nil {
+		logrus.Printf("创建文件内容请求失败: %v", err)
+		c.JSON(http.StatusInternalServerError, gin.H{"error": "服务器错误"})
+		return ""
+	}
+	req.Header.Set("Authorization", fmt.Sprintf("Bearer %s", apiKey))
+
+	client := &http.Client{}
+	resp, err := client.Do(req)
+	if err != nil {
+		logrus.Printf("发送文件内容请求失败: %v", err)
+		c.JSON(http.StatusInternalServerError, gin.H{"error": "无法检索文件内容"})
+		return ""
+	}
+	defer resp.Body.Close()
+
+	if resp.StatusCode != http.StatusOK {
+		logrus.Printf("检索文件内容失败，状态码: %d", resp.StatusCode)
+		c.JSON(http.StatusInternalServerError, gin.H{"error": "无法检索文件内容"})
+		return ""
+	}
+
+	fileContentBytes, err := ioutil.ReadAll(resp.Body)
+	if err != nil {
+		logrus.Printf("读取文件内容响应失败: %v", err)
+		c.JSON(http.StatusInternalServerError, gin.H{"error": "读取文件内容失败"})
+		return ""
+	}
+
+	return string(fileContentBytes)
+}
+
+// SendStepFunRequest 通用的 HTTP 请求发送函数
 func SendStepFunRequest(method, url string, headers map[string]string, body *bytes.Buffer) (*http.Response, error) {
 	client := &http.Client{}
 	req, err := http.NewRequest(method, url, body)
 	if err != nil {
-		return nil, fmt.Errorf("failed to create request: %w", err)
+		return nil, fmt.Errorf("创建请求失败: %w", err)
 	}
 
 	for key, value := range headers {
@@ -555,7 +476,7 @@ func SendStepFunRequest(method, url string, headers map[string]string, body *byt
 
 	resp, err := client.Do(req)
 	if err != nil {
-		return nil, fmt.Errorf("failed to send request: %w", err)
+		return nil, fmt.Errorf("发送请求失败: %w", err)
 	}
 
 	return resp, nil

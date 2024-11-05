@@ -110,6 +110,7 @@ func (d *Database) createTables() error {
 		file_name VARCHAR(255) NOT NULL,            -- 文件名
 		file_path VARCHAR(512) NOT NULL,            -- 存储路径
 		file_type VARCHAR(50) NOT NULL,             -- 文件类型
+	    file_size INT NOT NULL, 
 		file_description TEXT,                      -- 文件描述
 		upload_time TIMESTAMP DEFAULT CURRENT_TIMESTAMP, -- 上传时间
 	    status VARCHAR(50) DEFAULT 'uploaded',        -- 文件状态
@@ -228,12 +229,12 @@ func (d *Database) UpdateKnowledgeBase(name, displayName, description, tags stri
 }
 
 // InsertUploadedFileTx 在事务中向 uploaded_files 表插入一条记录
-func (d *Database) InsertUploadedFileTx(tx *sql.Tx, fileID, fileName, filePath, fileType, fileDescription, username string) error {
+func (d *Database) InsertUploadedFileTx(tx *sql.Tx, fileID, fileName, filePath, fileType, fileDescription, username string, fileSize int64) error {
 	query := `
-		INSERT INTO uploaded_files (file_id, file_name, file_path, file_type, file_description, upload_time, status,username)
-		VALUES (?, ?, ?, ?, ?, NOW(), 'uploaded',?)
+		INSERT INTO uploaded_files (file_id, file_name, file_path, file_type, file_description, upload_time, status,username,file_size)
+		VALUES (?, ?, ?, ?, ?, NOW(), 'uploaded',?,?)
 	`
-	_, err := tx.Exec(query, fileID, fileName, filePath, fileType, fileDescription, username)
+	_, err := tx.Exec(query, fileID, fileName, filePath, fileType, fileDescription, username, fileSize)
 	if err != nil {
 		return fmt.Errorf("InsertUploadedFileTx: %w", err)
 	}
@@ -257,6 +258,20 @@ func (d *Database) InsertFileKnowledgeRelationTx(tx *sql.Tx, fileID, knowledgeBa
 func (d *Database) GetUploadedFileByID(fileID string) (*models.UploadedFile, error) {
 	query := "SELECT file_id, file_name, file_path,file_type FROM uploaded_files WHERE file_id = ?"
 	row := d.db.QueryRow(query, fileID)
+	var uf models.UploadedFile
+	if err := row.Scan(&uf.FileID, &uf.Filename, &uf.FilePath, &uf.FileType); err != nil {
+		if err == sql.ErrNoRows {
+			return nil, nil // 未找到记录
+		}
+		return nil, err
+	}
+	return &uf, nil
+}
+
+// GetUploadedFileByFileNameSizeUsername 查询用户是否上传了重复的文件，如果是则直接返回，无需存醋。
+func (d *Database) GetUploadedFileByFileNameSizeUsername(Filename, UserName string, FileSize int64) (*models.UploadedFile, error) {
+	query := "SELECT file_id, file_name, file_path,file_type FROM uploaded_files WHERE file_name = ? AND file_size = ? AND username = ?"
+	row := d.db.QueryRow(query, Filename, FileSize, UserName)
 	var uf models.UploadedFile
 	if err := row.Scan(&uf.FileID, &uf.Filename, &uf.FilePath, &uf.FileType); err != nil {
 		if err == sql.ErrNoRows {
