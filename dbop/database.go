@@ -87,6 +87,20 @@ func NewDatabase() (*Database, error) {
 
 // createTables 创建必要的数据库表
 func (d *Database) createTables() error {
+	// 创建 users 表
+	createUsersTable := `
+    CREATE TABLE IF NOT EXISTS users (
+        id INT AUTO_INCREMENT PRIMARY KEY,
+        username VARCHAR(255) NOT NULL UNIQUE,
+        password VARCHAR(255) NOT NULL,
+        created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+        updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP
+    )`
+	_, err := d.db.Exec(createUsersTable)
+	if err != nil {
+		return fmt.Errorf("failed to create table users: %w", err)
+	}
+
 	createVectorStoresTable := `
 	CREATE TABLE IF NOT EXISTS vector_stores (
     id VARCHAR(255) PRIMARY KEY,
@@ -99,7 +113,7 @@ func (d *Database) createTables() error {
     created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
 	FOREIGN KEY (creator_id) REFERENCES users(username)
 )`
-	_, err := d.db.Exec(createVectorStoresTable)
+	_, err = d.db.Exec(createVectorStoresTable)
 	if err != nil {
 		return fmt.Errorf("failed to create table vector_stores: %w", err)
 	}
@@ -149,19 +163,6 @@ func (d *Database) createTables() error {
 	_, err = d.db.Exec(createFilesTable)
 	if err != nil {
 		return fmt.Errorf("failed to create table files: %w", err)
-	}
-	// 创建 users 表
-	createUsersTable := `
-    CREATE TABLE IF NOT EXISTS users (
-        id INT AUTO_INCREMENT PRIMARY KEY,
-        username VARCHAR(255) NOT NULL UNIQUE,
-        password VARCHAR(255) NOT NULL,
-        created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
-        updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP
-    )`
-	_, err = d.db.Exec(createUsersTable)
-	if err != nil {
-		return fmt.Errorf("failed to create table users: %w", err)
 	}
 
 	return nil

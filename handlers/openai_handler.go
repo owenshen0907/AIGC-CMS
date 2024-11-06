@@ -14,6 +14,7 @@ import (
 	"openapi-cms/middleware"
 	"openapi-cms/models"
 	"os"
+	"path/filepath"
 	"strings"
 )
 
@@ -42,9 +43,9 @@ func HandleChatMessagesChatGpt(db *dbop.Database) gin.HandlerFunc {
 		}
 		logrus.Printf("StepFun 请求报文: %s", reqBodyBytes)
 
-		apiKey := os.Getenv("STEPFUN_API_KEY")
+		apiKey := os.Getenv("OPENAI_API_KEY")
 		if apiKey == "" {
-			logrus.Println("STEPFUN_API_KEY is not set")
+			logrus.Println("OPENAI_API_KEY is not set")
 			c.JSON(http.StatusInternalServerError, gin.H{"error": "Server configuration error"})
 			return
 		}
@@ -117,22 +118,13 @@ func HandleChatMessagesChatGpt(db *dbop.Database) gin.HandlerFunc {
 			}
 		}
 
-		//确认model
-		//payload.FileType="img" 输入token小于4k等于4k就选step-1v-8k。输入token大于4k小于等于31k就选step-1v-32k,大于31k就报错
-		//file_type不等于img,检查输入token,小于等于2k,就选step-1-flash。大于2k小于等于6k,就选step-1-8k。超过6k小于等于20k,就选step-1-32k。超过20k小于等于100k就选step-1-128k。超过100k小于等于200k就选step-1-256k。大于200k就报错。
-		// 确认model
-		model, err := getModelName(apiKey, messages, payload.FileType, payload.PerformanceLevel)
-		if err != nil {
-			logrus.Printf("Error getting model name: %v", err)
-			c.JSON(http.StatusBadRequest, gin.H{"error": err.Error()})
-			return
-		}
+		model := "gpt-4o-mini"
 
 		stepFunRequest := models.StepFunRequestPayload{
-			Model:      model,
-			Stream:     true,
-			Messages:   messages,
-			ToolChoice: "auto",
+			Model:    model,
+			Stream:   true,
+			Messages: messages,
+			//ToolChoice: "auto",
 			ResponseFormat: models.ResponseFormat{
 				Type: "text", // 设置默认值为 "text"
 			},
@@ -152,23 +144,6 @@ func HandleChatMessagesChatGpt(db *dbop.Database) gin.HandlerFunc {
 			tools = append(tools, webSearchTool)
 		}
 
-		// 如果前端传递了 vector_store_id，则添加 retrieval 工具
-		if strings.TrimSpace(payload.VectorStoreID) != "" {
-			retrievalTool := models.StepFunTool{
-				Type: "retrieval",
-				Function: models.StepFunToolFunction{
-					Description: payload.Description,
-					Options: map[string]string{
-						"vector_store_id": payload.VectorStoreID, // 从前端传递的 vector_store_id
-						"prompt_template": "从文档 {{knowledge}} 中找到问题 {{query}} 的答案。根据文档内容中的语句找到答案，如果文档中没用答案则告诉用户找不到相关信息；",
-					},
-				},
-			}
-			tools = append(tools, retrievalTool)
-		} else {
-			logrus.Println("vector_store_id not provided, skipping retrieval tool")
-		}
-
 		// 将工具添加到请求中
 		stepFunRequest.Tools = tools
 		// 将请求体编码为 JSON
@@ -183,7 +158,7 @@ func HandleChatMessagesChatGpt(db *dbop.Database) gin.HandlerFunc {
 		//logrus.Printf("StepFun API 请求报文: %s", stepFunReqBodyBytes)
 		fmt.Printf("StepFun API 请求报文: %s", stepFunReqBodyBytes)
 		// 创建向 StepFun API 发送的 HTTP 请求
-		stepFunReq, err := http.NewRequest("POST", "https://api.stepfun.com/v1/chat/completions", bytes.NewBuffer(stepFunReqBodyBytes))
+		stepFunReq, err := http.NewRequest("POST", "https://api.openai.com/v1/chat/completions", bytes.NewBuffer(stepFunReqBodyBytes))
 		if err != nil {
 			logrus.Printf("Error creating request: %v", err)
 			c.JSON(http.StatusInternalServerError, gin.H{"error": "Server error"})
@@ -213,8 +188,8 @@ func HandleChatMessagesChatGpt(db *dbop.Database) gin.HandlerFunc {
 					errorText += scanner.Text()
 				}
 			}
-			logrus.Printf("StepFun API returned status: %s, message: %s", resp.Status, errorText)
-			c.JSON(resp.StatusCode, gin.H{"error": "StepFun API error"})
+			logrus.Printf("OpenAI returned status: %s, message: %s", resp.Status, errorText)
+			c.JSON(resp.StatusCode, gin.H{"error": "OpenAI error"})
 			return
 		}
 
@@ -446,9 +421,17 @@ func processImageMessages(db *dbop.Database, payload models.RequestPayload) (mod
 			logrus.Printf("未找到 FileID 为 %s 的上传文件", fileID)
 			return models.StepFunMessage{}, fmt.Errorf("未找到 FileID 为 %s 的上传文件", fileID)
 		}
+		// 从环境变量中读取文件保存路径
+		uploadDir := os.Getenv("FILE_PATH")
+		if uploadDir == "" {
+			uploadDir = "./uploads" // 默认值（可选）
+			logrus.Warn("环境变量 'FILE_PATH' 未设置，使用默认路径 './uploads'")
+		}
+		// 构建新的目标目录路径：uploadDir/username/currentDate
+		targetDir := filepath.Join(uploadDir, uploadedFile.FilePath)
 
 		// 读取并进行 Base64 编码
-		imageData, err := ioutil.ReadFile(uploadedFile.FilePath)
+		imageData, err := ioutil.ReadFile(targetDir)
 		if err != nil {
 			logrus.Printf("读取图片文件时出错: %v", err)
 			return models.StepFunMessage{}, fmt.Errorf("读取图片文件失败")

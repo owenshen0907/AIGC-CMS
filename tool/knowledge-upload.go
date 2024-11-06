@@ -176,12 +176,15 @@ func HandleUploadFile(c *gin.Context, db *dbop.Database) {
 		c.JSON(http.StatusInternalServerError, gin.H{"error": "无法存储文件信息"})
 		return
 	}
-	// 插入文件与知识库的关联关系到 fileKnowledgeRelations 表中
-	err = db.InsertFileKnowledgeRelationTx(tx, fileID, vectorStoreID)
-	if err != nil {
-		logrus.Errorf("插入文件与知识库关联关系时出错: %v", err)
-		c.JSON(http.StatusInternalServerError, gin.H{"error": "无法关联文件与知识库"})
-		return
+	// 判断文件是否为文本文件，如果是则与知识库关联
+	if isTextFile(header.Filename) {
+		// 插入文件与知识库的关联关系到 fileKnowledgeRelations 表中
+		err = db.InsertFileKnowledgeRelationTx(tx, fileID, vectorStoreID)
+		if err != nil {
+			logrus.Errorf("插入文件与知识库关联关系时出错: %v", err)
+			c.JSON(http.StatusInternalServerError, gin.H{"error": "无法关联文件与知识库"})
+			return
+		}
 	}
 
 	file_web_path := fmt.Sprintf("%s%s", file_web_host, relativeFilePath)
@@ -193,4 +196,14 @@ func HandleUploadFile(c *gin.Context, db *dbop.Database) {
 		"file_path":     relativeFilePath,
 		"file_web_path": file_web_path,
 	})
+}
+
+// 判断是否为文本文件的函数
+func isTextFile(fileName string) bool {
+	fileExt := filepath.Ext(fileName)
+	return fileExt == ".txt" || fileExt == ".md" || fileExt == ".pdf" ||
+		fileExt == ".doc" || fileExt == ".docx" || fileExt == ".xls" ||
+		fileExt == ".xlsx" || fileExt == ".ppt" || fileExt == ".pptx" ||
+		fileExt == ".csv" || fileExt == ".html" || fileExt == ".htm" ||
+		fileExt == ".xml"
 }
