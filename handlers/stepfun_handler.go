@@ -384,7 +384,7 @@ func processUploadedFiles(db *dbop.Database, payload *models.RequestPayload, api
 			return fmt.Errorf("未找到 FileID 为 %s 的上传文件", fileID)
 		}
 		//将文件根目录，文件路径拼接起来
-		filePath := fmt.Sprintf("%s/%s", os.Getenv("file_path"), fileRecord.FilePath)
+		filePath := fmt.Sprintf("%s/%s", os.Getenv("FILE_PATH"), fileRecord.FilePath)
 		// 上传文件到 StepFun 并进行提取
 		uploadResp, err := tool.UploadFileToStepFunWithExtract(filePath, fileRecord.Filename)
 		if err != nil {
@@ -405,8 +405,8 @@ func processUploadedFiles(db *dbop.Database, payload *models.RequestPayload, api
 		}
 		logrus.Printf("文件解析完成，状态: %s", status)
 
-		// 插入文件信息到数据库
-		err = db.InsertFile(uploadResp.ID, "local20241015145535", uploadResp.Bytes, fileID, status, "file-extract")
+		//直到成功后，将插入文件信息到数据库
+		err = db.InsertFile(uploadResp.ID, "local", uploadResp.Bytes, fileID, status, "file-extract")
 		if err != nil {
 			logrus.Errorf("插入文件记录到数据库失败: %v", err)
 			c.JSON(http.StatusInternalServerError, gin.H{"error": "插入文件记录失败"})

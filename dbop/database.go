@@ -106,8 +106,8 @@ func (d *Database) createTables() error {
     id VARCHAR(255) PRIMARY KEY,
     name VARCHAR(255) NOT NULL UNIQUE,          -- 知识库标识，用于唯一标识知识库
     display_name VARCHAR(255) NOT NULL,  -- 知识库名称
-    description TEXT,
-    tags VARCHAR(255),
+    description TEXT DEFAULT NULL,
+    tags VARCHAR(255) DEFAULT NULL,
     model_owner VARCHAR(255) NOT NULL,   -- 归属模型
     creator_id VARCHAR(255) NOT NULL,    -- 创建人ID
     created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,

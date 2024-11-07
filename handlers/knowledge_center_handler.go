@@ -28,11 +28,11 @@ func HandleCreateVectorStore(c *gin.Context, db models.DatabaseInterface) {
 	}
 	userName, ok := middleware.GetUserName(c)
 	if !ok {
-		logrus.Warn("userName not found or invalid")
+		logrus.Warn("未能识别创建者的身份，导致创建识别")
 		c.JSON(http.StatusUnauthorized, gin.H{"error": "Unauthorized"})
 		return
 	}
-	fmt.Println("****userName:", userName)
+	//fmt.Println("****userName:", userName)
 
 	// 绑定 JSON 请求体到结构体
 	if err := c.ShouldBindJSON(&payload); err != nil {
@@ -41,17 +41,17 @@ func HandleCreateVectorStore(c *gin.Context, db models.DatabaseInterface) {
 		return
 	}
 
-	// 验证 name 字段：只能包含字母、数字、下划线，且不能以下划线开头
+	// 验证 name 字段：也就是知识库名，主要是模型供应商的要求。只能包含字母、数字、下划线，且不能以下划线开头
 	validNameRegex := regexp.MustCompile(`^[a-zA-Z0-9][a-zA-Z0-9_]*$`)
 	if !validNameRegex.MatchString(payload.Name) {
 		logrus.WithField("name", payload.Name).Error("Invalid name format")
-		c.JSON(http.StatusBadRequest, gin.H{"error": "The name can only contain letters, numbers, and underscores, and cannot start with an underscore."})
+		c.JSON(http.StatusBadRequest, gin.H{"error": "知识库标识只能包含字母、数字和下划线，且不能以下划线开头"})
 		return
 	}
-	// 验证 display_name 为必填
+	// 验证 display_name 为必填。再我自己使用的时候，便于查看的。避免模型供应商的name不能使用中文
 	if strings.TrimSpace(payload.DisplayName) == "" {
-		logrus.Error("Display name is required")
-		c.JSON(http.StatusBadRequest, gin.H{"error": "Display name is required"})
+		logrus.Error("知识库名称是必填")
+		c.JSON(http.StatusBadRequest, gin.H{"error": "知识库名称是必填"})
 		return
 	}
 
@@ -132,7 +132,7 @@ func HandleCreateVectorStore(c *gin.Context, db models.DatabaseInterface) {
 	// Step 3: 如果不存在数据库，则先插入基本信息到数据库
 	timeNow := time.Now().Format("20060102150405")
 	id := fmt.Sprintf("%s%s", payload.Name, timeNow)
-	if err := db.InsertVectorStore(id, payload.Name, payload.DisplayName, payload.Description, payload.Tags, payload.ModelOwner, "admin"); err != nil {
+	if err := db.InsertVectorStore(id, payload.Name, payload.DisplayName, payload.Description, payload.Tags, payload.ModelOwner, userName); err != nil {
 		logrus.WithError(err).Error("Error inserting vector store into database")
 		c.JSON(http.StatusInternalServerError, gin.H{"error": "Database error"})
 		return
@@ -181,13 +181,13 @@ func handleModelOwnerAPI(c *gin.Context, db models.DatabaseInterface, payload st
 		// 记录警告并跳过 ID 更新
 		logrus.WithField("model_owner", payload.ModelOwner).Warn("Model owner API not implemented, skipping ID update")
 		return id, nil
-	case "local":
-		newID, err := localAPI(c, db, payload)
-		if err != nil {
-			return "", err
-		}
-		// 本地逻辑已经在数据库插入时处理，不需调用外部 API
-		return newID, nil
+	//case "local":
+	//	newID, err := localAPI(c, db, payload)
+	//	if err != nil {
+	//		return "", err
+	//	}
+	//	// 本地逻辑已经在数据库插入时处理，不需调用外部 API
+	//	return newID, nil
 	default:
 		// 无效的 ModelOwner
 		c.JSON(http.StatusBadRequest, gin.H{"error": "Invalid model owner"})
@@ -243,8 +243,8 @@ func HandleUpdateKnowledgeBase(c *gin.Context, db models.DatabaseInterface) {
 	// 获取现有的知识库记录
 	existingKB, err := db.GetKnowledgeBaseByName(name)
 	if err != nil {
-		logrus.WithError(err).Error("Error fetching knowledge base from database")
-		c.JSON(http.StatusInternalServerError, gin.H{"error": "Database error"})
+		logrus.WithError(err).Error("查询知识库记录失败")
+		c.JSON(http.StatusInternalServerError, gin.H{"error": "查询知识库记录失败"})
 		return
 	}
 
@@ -407,24 +407,24 @@ func baichuanAPI() error {
 	return fmt.Errorf("This functionality is not yet implemented for the selected model.")
 }
 
-// localAPI 修改为返回生成的ID和error
-func localAPI(c *gin.Context, db models.DatabaseInterface, payload struct {
-	Name        string `json:"name"`
-	DisplayName string `json:"display_name"`
-	Description string `json:"description"`
-	Tags        string `json:"tags"`
-	ModelOwner  string `json:"model_owner"`
-}) (string, error) {
-	// 生成基于 name 和时间的 ID，时间精确到秒
-	timeNow := time.Now().Format("20060102150405")
-	id := fmt.Sprintf("%s%s", payload.Name, timeNow)
-
-	// 插入数据库
-	if err := db.InsertVectorStore(id, payload.Name, payload.DisplayName, payload.Description, payload.Tags, payload.ModelOwner, "admin"); err != nil {
-		logrus.WithError(err).Error("Error inserting vector store into database")
-		c.JSON(http.StatusInternalServerError, gin.H{"error": "Database error"})
-		return "", err
-	}
-	// 返回生成的ID
-	return id, nil
-}
+//// localAPI 修改为返回生成的ID和error
+//func localAPI(c *gin.Context, db models.DatabaseInterface, payload struct {
+//	Name        string `json:"name"`
+//	DisplayName string `json:"display_name"`
+//	Description string `json:"description"`
+//	Tags        string `json:"tags"`
+//	ModelOwner  string `json:"model_owner"`
+//}) (string, error) {
+//	// 生成基于 name 和时间的 ID，时间精确到秒
+//	timeNow := time.Now().Format("20060102150405")
+//	id := fmt.Sprintf("%s%s", payload.Name, timeNow)
+//
+//	// 插入数据库
+//	if err := db.InsertVectorStore(id, payload.Name, payload.DisplayName, payload.Description, payload.Tags, payload.ModelOwner, "admin"); err != nil {
+//		logrus.WithError(err).Error("Error inserting vector store into database")
+//		c.JSON(http.StatusInternalServerError, gin.H{"error": "Database error"})
+//		return "", err
+//	}
+//	// 返回生成的ID
+//	return id, nil
+//}

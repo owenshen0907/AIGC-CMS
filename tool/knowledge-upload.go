@@ -31,7 +31,7 @@ func HandleUploadFile(c *gin.Context, db *dbop.Database) {
 	// 从表单中获取，知识库id vector_store_id
 	vectorStoreID := c.PostForm("vector_store_id")
 	if vectorStoreID == "" {
-		c.JSON(http.StatusBadRequest, gin.H{"error": "vector_store_id is required"})
+		c.JSON(http.StatusBadRequest, gin.H{"error": "向量知识库ID为必填"})
 		return
 	}
 
@@ -177,7 +177,7 @@ func HandleUploadFile(c *gin.Context, db *dbop.Database) {
 		return
 	}
 	// 判断文件是否为文本文件，如果是则与知识库关联
-	if isTextFile(header.Filename) {
+	if isTextFile(header.Filename) && vectorStoreID != "local" {
 		// 插入文件与知识库的关联关系到 fileKnowledgeRelations 表中
 		err = db.InsertFileKnowledgeRelationTx(tx, fileID, vectorStoreID)
 		if err != nil {
