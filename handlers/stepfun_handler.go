@@ -383,10 +383,16 @@ func processUploadedFiles(db *dbop.Database, payload *models.RequestPayload, api
 			c.JSON(http.StatusBadRequest, gin.H{"error": "上传的文件未找到"})
 			return fmt.Errorf("未找到 FileID 为 %s 的上传文件", fileID)
 		}
+		if fileRecord.StepFileID != "" {
+			logrus.Printf("文件 ID %s 已存在于已解析过，直接取历史stepfun的记录即可", fileID)
+			// 将 VectorStoreID 添加到 payload 的 VectorFileIds 中
+			payload.VectorFileIds = append(payload.VectorFileIds, fileRecord.StepFileID)
+			return nil
+		}
 		//将文件根目录，文件路径拼接起来
 		filePath := fmt.Sprintf("%s/%s", os.Getenv("FILE_PATH"), fileRecord.FilePath)
 		// 上传文件到 StepFun 并进行提取
-		uploadResp, err := tool.UploadFileToStepFunWithExtract(filePath, fileRecord.Filename)
+		uploadResp, err := tool.UploadFileToStepFunWithExtract(filePath, fileRecord.Filename, "file-extract")
 		if err != nil {
 			logrus.Errorf("上传文件到 StepFun 失败: %v", err)
 			// 更新文件状态为 "failed"

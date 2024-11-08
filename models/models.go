@@ -173,6 +173,11 @@ type UploadedFile struct {
 	UploadTime  string `json:"upload_time"`
 	UserName    string `json:"username"`
 	FileSize    int    `json:"file_size"`
+	//下面这个主要用于把重复上传的文件的StepFileID返回给前端，这样就不用重复上传解析了
+	StepVectorID    string `json:"step_vector_id"`
+	StepFileID      string `json:"step_file_id"`
+	StepFilePurpose string `json:"step_file_purpose"`
+	StepFileStatus  string `json:"step_file_status"`
 }
 
 // FileStatusResponse 请求： StepFun API ,获取：doc parser上传文件的响应，和获取文件状态响应

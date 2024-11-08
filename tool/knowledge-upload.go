@@ -5,9 +5,11 @@ import (
 	"fmt"
 	"github.com/joho/godotenv"
 	"io"
+	"mime/multipart"
 	"net/http"
 	"openapi-cms/dbop"
 	"openapi-cms/middleware"
+	"openapi-cms/models"
 	"os"
 	"path/filepath"
 	"time"
@@ -27,35 +29,14 @@ func init() {
 
 // HandleUploadFile 处理上传文件的请求
 func HandleUploadFile(c *gin.Context, db *dbop.Database) {
-	file_web_host := os.Getenv("FILE_WEB_HOST")
-	// 从表单中获取，知识库id vector_store_id
-	vectorStoreID := c.PostForm("vector_store_id")
-	if vectorStoreID == "" {
-		c.JSON(http.StatusBadRequest, gin.H{"error": "向量知识库ID为必填"})
+	// 获取必要的表单参数
+	vectorStoreID, fileDescription, modelOwner, err := getFormParams(c)
+	if err != nil {
+		c.JSON(http.StatusBadRequest, gin.H{"error": err.Error()})
 		return
 	}
-
-	// 从表单中获取 file_description
-	fileDescription := c.PostForm("file_description")
-
-	// 从表单中获取 model_owner
-	modelOwner := c.PostForm("model_owner")
-	if modelOwner == "" {
-		c.JSON(http.StatusBadRequest, gin.H{"error": "model_owner is required"})
-		return
-	}
-
-	// 检查 model_owner 的值
-	switch modelOwner {
-	case "local", "stepfun":
-		// 允许的 model_owner，继续处理
-	default:
-		// 不支持的 model_owner，返回错误
-		c.JSON(http.StatusBadRequest, gin.H{
-			"error": fmt.Sprintf("暂不支持 model_owner 为 '%s' 的知识库文件上传，待接入后再实现", modelOwner),
-		})
-		return
-	}
+	// 获取上传目录
+	uploadDir := getUploadDir()
 
 	// 从表单中获取文件
 	file, header, err := c.Request.FormFile("file")
@@ -64,138 +45,278 @@ func HandleUploadFile(c *gin.Context, db *dbop.Database) {
 		c.JSON(http.StatusBadRequest, gin.H{"error": "File is required"})
 		return
 	}
+	defer file.Close()
+
 	// 获取文件大小
 	fileSize := header.Size
-	defer file.Close()
-	// 从上下文中获取用户名
+
+	// 从上下文中获取用户名，如果未找到则返回错误
 	userName, exists := middleware.GetUserName(c)
 	if !exists || userName == "" {
 		logrus.Warn("未能获取用户名")
 		c.JSON(http.StatusUnauthorized, gin.H{"error": "Unauthorized: username not found"})
 		return
 	}
-	//判断是否文件已存在，如果已存在则直接返回已存在的文件信息，否则继续上传文件
+	// 检查 model_owner 的值
+	if err := validateModelOwner(modelOwner, c); err != nil {
+		return
+	}
+	// 判断文件是否已存在
 	uploadedFile, err := db.GetUploadedFileByFileNameSizeUsername(header.Filename, userName, fileSize)
 	if err != nil {
-		logrus.Errorf("Error retrieving the file: %v", err)
-		c.JSON(http.StatusBadRequest, gin.H{"error": "File is required"})
-
-	}
-	if uploadedFile == nil {
-		logrus.Info("文件不存在，继续处理上传")
-	} else {
-		// 返回成功响应
-		logrus.Info("此文件该用户已经上传，直接使用历史文件。")
-		file_web_path := fmt.Sprintf("%s%s", file_web_host, uploadedFile.FilePath)
-		c.JSON(http.StatusOK, gin.H{
-			"file_id":       uploadedFile.FileID,
-			"status":        "文件已成功保存并与知识库关联",
-			"file_path":     uploadedFile.FilePath,
-			"file_web_path": file_web_path,
-		})
+		logrus.Errorf("判断用户名下是否已经上传过该文件报错: %v", err)
+		c.JSON(http.StatusBadRequest, gin.H{"error": "判断用户名下是否已经上传过该文件报错"})
 		return
 	}
-	// 获取当前日期，格式为 YYYY-MM-DD
-	currentDate := time.Now().Format("2006-01-02")
+	// 处理已存在的文件
+	if uploadedFile != nil {
+		file_web_host := os.Getenv("FILE_WEB_HOST")
+		//拼接文件路径
+		file_web_path := fmt.Sprintf("%s%s", file_web_host, uploadedFile.FilePath)
+		//判断是否为文件，如果是再进行下一步，否则直接，跳过。（图片视频等无需解析或retrieval）
+		if isTextFile(header.Filename) {
+			handleExistingFile(uploadedFile, vectorStoreID, uploadDir, file_web_path, c, db)
+			return
+		} else {
+			c.JSON(http.StatusOK, gin.H{
+				"file_id":       uploadedFile.FileID,
+				"status":        "此文件该用户已经上传，直接使用历史文件。待发送打消息窗口后再获取文件内容",
+				"file_web_path": file_web_path,
+			})
+			return
+		}
+	}
+	// 处理新文件上传（文件未上传过）
+	if err := processNewFileUpload(c, db, file, header, uploadDir, userName, vectorStoreID, fileDescription, fileSize); err != nil {
+		// 错误已在函数内部处理
+		return
+	}
+}
 
-	// 从环境变量中读取文件保存路径
+// 获取表单参数
+func getFormParams(c *gin.Context) (vectorStoreID, fileDescription, modelOwner string, err error) {
+	vectorStoreID = c.PostForm("vector_store_id")
+	if vectorStoreID == "" {
+		return "", "", "", fmt.Errorf("向量知识库ID为必填")
+	}
+
+	fileDescription = c.PostForm("file_description")
+
+	modelOwner = c.PostForm("model_owner")
+	if modelOwner == "" {
+		return "", "", "", fmt.Errorf("model_owner is required")
+	}
+
+	return vectorStoreID, fileDescription, modelOwner, nil
+}
+
+// 获取上传目录
+func getUploadDir() string {
 	uploadDir := os.Getenv("FILE_PATH")
 	if uploadDir == "" {
-		uploadDir = "./uploads" // 默认值（可选）
+		uploadDir = "./uploads" // 默认值
 		logrus.Warn("环境变量 'FILE_PATH' 未设置，使用默认路径 './uploads'")
 	}
-	// 构建新的目标目录路径：uploadDir/username/currentDate
-	targetDir := filepath.Join(uploadDir, userName, currentDate)
+	return uploadDir
+}
 
-	// 确保上传目录存在
-	err = os.MkdirAll(targetDir, os.ModePerm)
-	if err != nil {
+// 验证 model_owner
+func validateModelOwner(modelOwner string, c *gin.Context) error {
+	switch modelOwner {
+	case "local", "stepfun":
+		// 允许的 model_owner，继续处理
+		return nil
+	default:
+		// 不支持的 model_owner，返回错误
+		c.JSON(http.StatusBadRequest, gin.H{
+			"error": fmt.Sprintf("暂不支持 model_owner 为 '%s' 的知识库文件上传，待接入后再实现", modelOwner),
+		})
+		return fmt.Errorf("unsupported model_owner")
+	}
+}
+
+// 处理已存在的文件
+func handleExistingFile(uploadedFile *models.UploadedFile, vectorStoreID, uploadDir, file_web_path string, c *gin.Context, db *dbop.Database) {
+	//file_web_host := os.Getenv("FILE_WEB_HOST")
+	//如果是聊天窗口上传的文件
+	if vectorStoreID == "local" {
+		logrus.Info("聊天窗口上传的文件，直接返回upload表的文件ID")
+		//拼接文件路径
+		//file_web_path := fmt.Sprintf("%s%s", file_web_host, uploadedFile.FilePath)
+		c.JSON(http.StatusOK, gin.H{
+			"file_id": uploadedFile.FileID,
+			"status":  "此文件该用户已经上传，直接使用历史文件。待发送打消息窗口后再获取文件内容",
+			//"file_path":         uploadedFile.FilePath,
+			"file_web_path": file_web_path,
+			//"step_vector_id":    uploadedFile.StepVectorID,
+			//"step_file_id":      uploadedFile.StepFileID,
+			//"step_file_purpose": uploadedFile.StepFilePurpose,
+			//"step_file_status":  uploadedFile.StepFileStatus,
+		})
+		return
+	} else {
+		//处理知识库上传的文件
+		//logrus.Info("从知识库上传的文件，需要调stepfun接口上传文件去向量化")
+		//判断文件已经上传给step且类型为retrieval
+		if vectorStoreID == uploadedFile.StepVectorID && uploadedFile.StepFilePurpose == "retrieval" {
+			logrus.Info("文件已向量化，无需任何处理")
+			c.JSON(http.StatusOK, gin.H{
+				"status": "文件已向量化，无需任何处理",
+			})
+			return
+		} else {
+			//如果知识库或者类型有一个对不上，就说明该文件虽然上传过，但不再同一个知识库，或者不是retrieval用途，则需要上传文件到stepfun
+			// 获取上传目录
+			//uploadDir := getUploadDir()
+			FilePath := filepath.Join(uploadDir, uploadedFile.FilePath)
+			//向调用doc parser上传文件
+			uploadResp, err := UploadFileToStepFunWithExtract(FilePath, uploadedFile.Filename, "retrieval")
+			if err != nil {
+				logrus.Errorf("上传文件到stepfun报错 %v", err)
+				c.JSON(http.StatusInternalServerError, gin.H{"error": "上传文件到stepfun报错"})
+				return
+			}
+			// 更新数据库中的 files 表，存储 API 返回的文件信息，增加 fileID
+			err = db.InsertFile(uploadResp.ID, vectorStoreID, uploadResp.Bytes, uploadedFile.FileID, "processing", "retrieval")
+			if err != nil {
+				logrus.Errorf("插入files表，retrieval的文件数据 %v", err)
+				c.JSON(http.StatusInternalServerError, gin.H{"error": "插入files表，retrieval的文件数据报错"})
+				return
+			}
+			//再绑定文件到知识库。确保文件进行向量化
+			fileIDs := []string{uploadedFile.StepFileID}
+			_, err = uploadFileToStepFunWithRetrieval(vectorStoreID, fileIDs)
+			if err != nil {
+				logrus.Errorf("绑定文件到知识库报错 %v", err)
+				c.JSON(http.StatusInternalServerError, gin.H{"error": "绑定文件到知识库报错"})
+				return
+			}
+			c.JSON(http.StatusOK, gin.H{
+				"status": "文件绑定到知识库，正常向量化中，可以在知识库点击获取向量化状态，获取向量化进度",
+			})
+		}
+	}
+}
+
+// 处理新文件上传
+func processNewFileUpload(
+	c *gin.Context,
+	db *dbop.Database,
+	file multipart.File,
+	header *multipart.FileHeader,
+	uploadDir, userName, vectorStoreID, fileDescription string,
+	fileSize int64,
+) error {
+	currentDate := time.Now().Format("2006-01-02")
+	//跟目录/用户名/日期
+	targetDir := filepath.Join(uploadDir, userName, currentDate)
+	// 创建上传目录
+	if err := os.MkdirAll(targetDir, os.ModePerm); err != nil {
 		logrus.Errorf("创建上传目录失败: %v", err)
 		c.JSON(http.StatusInternalServerError, gin.H{"error": "无法创建上传目录"})
-		return
+		return err
 	}
-	// 确保文件名安全，防止路径遍历
+
+	// 确保文件名安全
 	fileName := filepath.Base(header.Filename)
 	filePath := filepath.Join(targetDir, fileName)
+	fmt.Printf("filePath:%v\n", filePath)
+	// 计算相对文件路径
+	relativeFilePath, err := filepath.Rel(uploadDir, filePath)
+	fmt.Printf("relativeFilePath:%v\n", relativeFilePath)
+	if err != nil {
+		logrus.Errorf("计算相对文件路径时出错: %v", err)
+		c.JSON(http.StatusInternalServerError, gin.H{"error": "路径处理错误"})
+		return err
+	}
+	file_web_host := os.Getenv("FILE_WEB_HOST")
+	file_web_path := fmt.Sprintf("%s%s", file_web_host, relativeFilePath)
 
+	// 创建文件
 	out, err := os.Create(filePath)
 	if err != nil {
-		logrus.Errorf("Error creating the file: %v", err)
-		c.JSON(http.StatusInternalServerError, gin.H{"error": "Failed to creating file"})
-		return
+		logrus.Errorf("创建文件失败: %v", err)
+		c.JSON(http.StatusInternalServerError, gin.H{"error": "创建文件失败"})
+		return err
 	}
 	defer out.Close()
 
-	_, err = io.Copy(out, file)
-	if err != nil {
-		logrus.Errorf("Error writing the file to disk: %v", err)
-		c.JSON(http.StatusInternalServerError, gin.H{"error": "Failed to write file"})
-		return
+	// 写入文件内容
+	if _, err = io.Copy(out, file); err != nil {
+		logrus.Errorf("写入文件到磁盘失败: %v", err)
+		c.JSON(http.StatusInternalServerError, gin.H{"error": "写入文件到磁盘失败"})
+		return err
 	}
-
-	// 将文件信息存储到数据库中的 uploaded_files 表，生成唯一的 fileID
+	// 生成文件ID和类型
 	fileID := uuid.New().String()
 	fileType := header.Header.Get("Content-Type")
+
 	// 开始数据库事务
 	tx, err := db.BeginTransaction()
 	if err != nil {
 		logrus.WithError(err).Error("启动事务时出错")
 		c.JSON(http.StatusInternalServerError, gin.H{"error": "数据库错误"})
-		return
+		return err
 	}
-
 	// 确保事务在函数结束时正确处理
 	defer func() {
 		if p := recover(); p != nil {
 			tx.Rollback()
 			logrus.Errorf("捕获到 panic: %v", p)
-			c.JSON(http.StatusInternalServerError, gin.H{"error": "内部服务器错误"})
+			// 注意：在 defer 中调用 c.JSON 可能导致响应冲突
 		} else if err != nil {
 			tx.Rollback()
 		} else {
-			err = db.CommitTransaction(tx)
-			if err != nil {
-				logrus.WithError(err).Error("提交事务时出错")
-				c.JSON(http.StatusInternalServerError, gin.H{"error": "数据库提交错误"})
+			if commitErr := db.CommitTransaction(tx); commitErr != nil {
+				logrus.WithError(commitErr).Error("提交事务时出错")
+				// 同上，避免在 defer 中调用 c.JSON
 			}
 		}
 	}()
 
-	// 计算相对于 uploadDir 的相对路径，例如 "username/2024-04-27/filename.ext"
-	relativeFilePath, err := filepath.Rel(uploadDir, filePath)
-	if err != nil {
-		logrus.Errorf("计算相对文件路径时出错: %v", err)
-		c.JSON(http.StatusInternalServerError, gin.H{"error": "路径处理错误"})
-		return
-	}
-
-	// 插入上传的文件信息到 uploaded_files 表中
-	err = db.InsertUploadedFileTx(tx, fileID, fileName, relativeFilePath, fileType, fileDescription, userName, fileSize)
-	if err != nil {
+	// 插入上传文件信息
+	if err = db.InsertUploadedFileTx(tx, fileID, fileName, relativeFilePath, fileType, fileDescription, userName, fileSize); err != nil {
 		logrus.Errorf("将上传文件记录插入数据库时出错: %v", err)
 		c.JSON(http.StatusInternalServerError, gin.H{"error": "无法存储文件信息"})
-		return
+		return err
 	}
-	// 判断文件是否为文本文件，如果是则与知识库关联
-	if isTextFile(header.Filename) && vectorStoreID != "local" {
-		// 插入文件与知识库的关联关系到 fileKnowledgeRelations 表中
-		err = db.InsertFileKnowledgeRelationTx(tx, fileID, vectorStoreID)
-		if err != nil {
-			logrus.Errorf("插入文件与知识库关联关系时出错: %v", err)
-			c.JSON(http.StatusInternalServerError, gin.H{"error": "无法关联文件与知识库"})
-			return
-		}
+	//判断是否是聊天窗口上传的文件
+	//----是聊天框的话，就直接返回文件id和路径即可
+	if vectorStoreID == "local" {
+		c.JSON(http.StatusOK, gin.H{
+			"file_id":       fileID,
+			"status":        "文件已上传",
+			"file_web_path": file_web_path,
+		})
+		return nil
 	}
-
-	file_web_path := fmt.Sprintf("%s%s", file_web_host, relativeFilePath)
-
-	// 返回成功响应
+	//----知识库的话，则直接用doc parser上传文件,然后关联知识库(无需判断是否为文件，从知识库上传的只有文件)
+	//调用doc parser上传文件
+	uploadResp, err := UploadFileToStepFunWithExtract(filePath, fileName, "retrieval")
+	if err != nil {
+		logrus.Errorf("上传文件到stepfun报错 %v", err)
+		c.JSON(http.StatusInternalServerError, gin.H{"error": "上传文件到stepfun报错"})
+		return nil
+	}
+	// 更新数据库中的 files 表，存储 API 返回的文件信息，增加 fileID
+	err = db.InsertFile(uploadResp.ID, vectorStoreID, uploadResp.Bytes, fileID, "processing", "retrieval")
+	if err != nil {
+		logrus.Errorf("插入files表，retrieval的文件数据 %v", err)
+		c.JSON(http.StatusInternalServerError, gin.H{"error": "插入files表，retrieval的文件数据报错"})
+		return nil
+	}
+	//再绑定文件到知识库。确保文件进行向量化
+	fileIDs := []string{uploadResp.ID}
+	_, err = uploadFileToStepFunWithRetrieval(vectorStoreID, fileIDs)
+	if err != nil {
+		logrus.Errorf("绑定文件到知识库报错 %v", err)
+		c.JSON(http.StatusInternalServerError, gin.H{"error": "绑定文件到知识库报错"})
+		return nil
+	}
 	c.JSON(http.StatusOK, gin.H{
-		"file_id":       fileID,
-		"status":        "文件已成功保存并与知识库关联",
-		"file_path":     relativeFilePath,
-		"file_web_path": file_web_path,
+		"status": "文件绑定到知识库，正常向量化中，可以在知识库点击获取向量化状态，获取向量化进度",
 	})
+	return nil
 }
 
 // 判断是否为文本文件的函数

@@ -74,8 +74,7 @@ func GetFilesByKnowledgeBaseID(db *Database) gin.HandlerFunc {
 		knowledgeBaseID := c.Param("id")
 
 		// SQL 查询，获取文件信息及其相关的向量存储信息
-		query := `
-			SELECT 
+		query := `SELECT 
 				uf.file_id,
 			    uf.file_name, 
 				uf.file_path, 
@@ -87,10 +86,8 @@ func GetFilesByKnowledgeBaseID(db *Database) gin.HandlerFunc {
 				COALESCE(f.created_at, '') AS vector_file_created_at, 
 				COALESCE(f.status, '') AS status  -- 如果没有状态则返回空字符串
 			FROM uploaded_files uf
-			LEFT JOIN fileKnowledgeRelations fkr ON uf.file_id = fkr.file_id  -- 通过 fileKnowledgeRelations 关联文件
-			LEFT JOIN vector_stores vs ON fkr.knowledge_base_id = vs.id  -- 关联到 vector_stores 表
 			LEFT JOIN files f ON uf.file_id = f.file_id  -- 使用 LEFT JOIN 获取可能为空的 files 表数据
-			WHERE uf.file_type NOT LIKE 'image%' and vs.id = ?
+			WHERE f.vector_store_id = ?
 		`
 
 		rows, err := db.Query(query, knowledgeBaseID)

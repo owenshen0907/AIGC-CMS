@@ -83,9 +83,9 @@ func main() {
 			tool.HandleUploadFile(c, db)
 		})
 		// 触发外部上传（使用各模型厂商知识库）
-		api.POST("/trigger-external-upload", func(c *gin.Context) {
-			tool.HandleTriggerExternalUpload(c, db)
-		})
+		//api.POST("/trigger-external-upload", func(c *gin.Context) {
+		//	tool.HandleTriggerExternalUpload(c, db)
+		//})
 		// 新增验证并返回用户名的路由
 		api.GET("/validate-user", handlers.HandleValidateUser(db))
 	}

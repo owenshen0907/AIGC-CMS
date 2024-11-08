@@ -257,10 +257,10 @@ func (d *Database) InsertFileKnowledgeRelationTx(tx *sql.Tx, fileID, knowledgeBa
 
 // GetUploadedFileByID 根据 fileID 获取上传文件记录
 func (d *Database) GetUploadedFileByID(fileID string) (*models.UploadedFile, error) {
-	query := "SELECT file_id, file_name, file_path,file_type FROM uploaded_files WHERE file_id = ?"
+	query := "SELECT uf.file_id, uf.file_name, uf.file_path,uf.file_type,COALESCE(f.id, '') FROM uploaded_files uf LEFT JOIN files f ON uf.file_id = f.file_id WHERE uf.file_id = ?"
 	row := d.db.QueryRow(query, fileID)
 	var uf models.UploadedFile
-	if err := row.Scan(&uf.FileID, &uf.Filename, &uf.FilePath, &uf.FileType); err != nil {
+	if err := row.Scan(&uf.FileID, &uf.Filename, &uf.FilePath, &uf.FileType, &uf.StepFileID); err != nil {
 		if err == sql.ErrNoRows {
 			return nil, nil // 未找到记录
 		}
@@ -271,10 +271,10 @@ func (d *Database) GetUploadedFileByID(fileID string) (*models.UploadedFile, err
 
 // GetUploadedFileByFileNameSizeUsername 查询用户是否上传了重复的文件，如果是则直接返回，无需存醋。
 func (d *Database) GetUploadedFileByFileNameSizeUsername(Filename, UserName string, FileSize int64) (*models.UploadedFile, error) {
-	query := "SELECT file_id, file_name, file_path,file_type FROM uploaded_files WHERE file_name = ? AND file_size = ? AND username = ?"
+	query := "SELECT uf.file_id, uf.file_name, uf.file_path,uf.file_type,COALESCE(f.vector_store_id, ''),COALESCE(f.id, ''),COALESCE(f.purpose, ''),COALESCE(f.status, '') FROM uploaded_files uf LEFT JOIN files f ON uf.file_id = f.file_id WHERE uf.file_name = ? AND uf.file_size = ? AND uf.username = ?"
 	row := d.db.QueryRow(query, Filename, FileSize, UserName)
 	var uf models.UploadedFile
-	if err := row.Scan(&uf.FileID, &uf.Filename, &uf.FilePath, &uf.FileType); err != nil {
+	if err := row.Scan(&uf.FileID, &uf.Filename, &uf.FilePath, &uf.FileType, &uf.StepVectorID, &uf.StepFileID, &uf.StepFilePurpose, &uf.StepFileStatus); err != nil {
 		if err == sql.ErrNoRows {
 			return nil, nil // 未找到记录
 		}
