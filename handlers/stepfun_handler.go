@@ -378,11 +378,13 @@ func processUploadedFiles(db *dbop.Database, payload *models.RequestPayload, api
 			c.JSON(http.StatusInternalServerError, gin.H{"error": "无法检索文件信息"})
 			return err
 		}
+		// 在调用外部接口的时候，判断本地文件是否存在，不存在的话，直接报错
 		if fileRecord == nil {
 			logrus.Printf("未找到 FileID 为 %s 的上传文件", fileID)
 			c.JSON(http.StatusBadRequest, gin.H{"error": "上传的文件未找到"})
 			return fmt.Errorf("未找到 FileID 为 %s 的上传文件", fileID)
 		}
+		//如果文件已存在，且已发送stepfun进行解析过，则直接取历史文件的解析记录，stepFileID田进来即可
 		if fileRecord.StepFileID != "" {
 			logrus.Printf("文件 ID %s 已存在于已解析过，直接取历史stepfun的记录即可", fileID)
 			// 将 VectorStoreID 添加到 payload 的 VectorFileIds 中
@@ -396,9 +398,9 @@ func processUploadedFiles(db *dbop.Database, payload *models.RequestPayload, api
 		if err != nil {
 			logrus.Errorf("上传文件到 StepFun 失败: %v", err)
 			// 更新文件状态为 "failed"
-			if updateErr := db.UpdateUploadedFileStatus(fileID, "failed"); updateErr != nil {
-				logrus.Errorf("更新文件状态为 'failed' 失败: %v", updateErr)
-			}
+			//if updateErr := db.UpdateUploadedFileStatus(fileID, "failed"); updateErr != nil {
+			//	logrus.Errorf("更新文件状态为 'failed' 失败: %v", updateErr)
+			//}
 			c.JSON(http.StatusInternalServerError, gin.H{"error": "文件上传失败"})
 			return err
 		}
@@ -435,6 +437,7 @@ func processUploadedFiles(db *dbop.Database, payload *models.RequestPayload, api
 // loadFileContent 加载文件内容
 func loadFileContent(c *gin.Context, vectorFileId, apiKey string) string {
 	fileContentURL := fmt.Sprintf("https://api.stepfun.com/v1/files/%s/content", vectorFileId)
+	fmt.Println(fileContentURL)
 	req, err := http.NewRequest("GET", fileContentURL, nil)
 	if err != nil {
 		logrus.Printf("创建文件内容请求失败: %v", err)
@@ -447,14 +450,14 @@ func loadFileContent(c *gin.Context, vectorFileId, apiKey string) string {
 	resp, err := client.Do(req)
 	if err != nil {
 		logrus.Printf("发送文件内容请求失败: %v", err)
-		c.JSON(http.StatusInternalServerError, gin.H{"error": "无法检索文件内容"})
+		c.JSON(http.StatusInternalServerError, gin.H{"error": "发送文件内容请求失败"})
 		return ""
 	}
 	defer resp.Body.Close()
 
 	if resp.StatusCode != http.StatusOK {
 		logrus.Printf("检索文件内容失败，状态码: %d", resp.StatusCode)
-		c.JSON(http.StatusInternalServerError, gin.H{"error": "无法检索文件内容"})
+		c.JSON(http.StatusInternalServerError, gin.H{"error": "获取stepfun文件内容失败"})
 		return ""
 	}
 

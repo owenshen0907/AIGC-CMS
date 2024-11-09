@@ -68,18 +68,43 @@ func HandleUploadFile(c *gin.Context, db *dbop.Database) {
 		c.JSON(http.StatusBadRequest, gin.H{"error": "判断用户名下是否已经上传过该文件报错"})
 		return
 	}
+	fmt.Print(uploadedFile)
 	// 处理已存在的文件
 	if uploadedFile != nil {
 		file_web_host := os.Getenv("FILE_WEB_HOST")
 		//拼接文件路径
-		file_web_path := fmt.Sprintf("%s%s", file_web_host, uploadedFile.FilePath)
+		file_web_path := fmt.Sprintf("%s%s", file_web_host, uploadedFile[0].FilePath)
 		//判断是否为文件，如果是再进行下一步，否则直接，跳过。（图片视频等无需解析或retrieval）
 		if isTextFile(header.Filename) {
-			handleExistingFile(uploadedFile, vectorStoreID, uploadDir, file_web_path, c, db)
+			stepFileStatus := ""
+			// 检查每个文件的 purpose 是否为 "retrieval"
+			//var retrievals []RetrievalFileInfo
+			for _, file := range uploadedFile {
+				if file.StepFilePurpose == "retrieval" && file.StepVectorID == vectorStoreID {
+					stepFileStatus = file.StepFileStatus
+					fmt.Println("再知识库下匹配到了同意图的文件")
+				}
+			}
+			//此文件已经在知识库下，并解析完成，跳过上传
+			if stepFileStatus == "completed" {
+				c.JSON(http.StatusOK, gin.H{
+					"status": "此文件已经在知识库下，解析完成，跳过上传",
+				})
+				return
+			}
+			//此文件已经在知识库下，在解析中，我将查询最新的解析状态
+			if stepFileStatus == "processing" {
+				c.JSON(http.StatusOK, gin.H{
+					"status": "此文件已经在知识库下，在解析中，请在页面点击【更新状态】查询最新的解析状态",
+				})
+				return
+			}
+			//此文件已上传，但未在此知识库下，将进行上传，解析，更新状态
+			handleExistingFile(uploadedFile[0], vectorStoreID, uploadDir, file_web_path, c, db)
 			return
 		} else {
 			c.JSON(http.StatusOK, gin.H{
-				"file_id":       uploadedFile.FileID,
+				"file_id":       uploadedFile[0].FileID,
 				"status":        "此文件该用户已经上传，直接使用历史文件。待发送打消息窗口后再获取文件内容",
 				"file_web_path": file_web_path,
 			})
@@ -157,6 +182,8 @@ func handleExistingFile(uploadedFile *models.UploadedFile, vectorStoreID, upload
 	} else {
 		//处理知识库上传的文件
 		//logrus.Info("从知识库上传的文件，需要调stepfun接口上传文件去向量化")
+		//判断文件是否被同时用作解析和retrieval
+
 		//判断文件已经上传给step且类型为retrieval
 		if vectorStoreID == uploadedFile.StepVectorID && uploadedFile.StepFilePurpose == "retrieval" {
 			logrus.Info("文件已向量化，无需任何处理")
@@ -185,7 +212,7 @@ func handleExistingFile(uploadedFile *models.UploadedFile, vectorStoreID, upload
 			}
 			//再绑定文件到知识库。确保文件进行向量化
 			fileIDs := []string{uploadedFile.StepFileID}
-			_, err = uploadFileToStepFunWithRetrieval(vectorStoreID, fileIDs)
+			_, err = BindFilesToVectorStore(vectorStoreID, fileIDs)
 			if err != nil {
 				logrus.Errorf("绑定文件到知识库报错 %v", err)
 				c.JSON(http.StatusInternalServerError, gin.H{"error": "绑定文件到知识库报错"})
@@ -299,7 +326,7 @@ func processNewFileUpload(
 		return nil
 	}
 	// 更新数据库中的 files 表，存储 API 返回的文件信息，增加 fileID
-	err = db.InsertFile(uploadResp.ID, vectorStoreID, uploadResp.Bytes, fileID, "processing", "retrieval")
+	err = db.InsertFile(uploadResp.ID, vectorStoreID, uploadResp.Bytes, fileID, "uploaded", "retrieval")
 	if err != nil {
 		logrus.Errorf("插入files表，retrieval的文件数据 %v", err)
 		c.JSON(http.StatusInternalServerError, gin.H{"error": "插入files表，retrieval的文件数据报错"})
@@ -307,10 +334,17 @@ func processNewFileUpload(
 	}
 	//再绑定文件到知识库。确保文件进行向量化
 	fileIDs := []string{uploadResp.ID}
-	_, err = uploadFileToStepFunWithRetrieval(vectorStoreID, fileIDs)
+	_, err = BindFilesToVectorStore(vectorStoreID, fileIDs)
 	if err != nil {
 		logrus.Errorf("绑定文件到知识库报错 %v", err)
 		c.JSON(http.StatusInternalServerError, gin.H{"error": "绑定文件到知识库报错"})
+		return nil
+	}
+	// 更新数据库中的 files 表，状态为processing
+	err = db.UpdateFilesStatus(fileID, "processing")
+	if err != nil {
+		logrus.Errorf("更新files状态为processing %v", err)
+		c.JSON(http.StatusInternalServerError, gin.H{"error": "更新files状态为processing报错"})
 		return nil
 	}
 	c.JSON(http.StatusOK, gin.H{

@@ -15,29 +15,36 @@ import (
 type UploadResponse = models.UploadResponse
 type FileStatusResponse = models.FileStatusResponse
 
-// uploadFileToStepFun 调用外部 StepFun API 上传文件到知识库。之后废弃调这个接口的上传功能。使用这个接口绑定file的ID和知识库的ID
-func uploadFileToStepFunWithRetrieval(vectorStoreID string, fileIDs []string) (*UploadResponse, error) {
+// BindFilesToVectorStore 绑定文件 ID 到知识库
+func BindFilesToVectorStore(vectorStoreID string, fileIDs []string) (*UploadResponse, error) {
 	// StepFun API URL
-	url := fmt.Sprintf("https://api.stepfun.com/v1/vector_stores/%s/files", vectorStoreID)
+	url := fmt.Sprintf("https://api.c.ibasemind.com/v1/vector_stores/%s/files", vectorStoreID)
 
-	// 构建请求体
-	requestBodyMap := map[string][]string{
-		"file_ids": fileIDs,
+	// 创建缓冲区和 multipart 写入器
+	var requestBody bytes.Buffer
+	writer := multipart.NewWriter(&requestBody)
+
+	// 添加 file_ids 字段
+	for _, fileID := range fileIDs {
+		// 根据 curl 请求，file_ids 的值需要包含引号
+		if err := writer.WriteField("file_ids", fmt.Sprintf("\"%s\"", fileID)); err != nil {
+			return nil, fmt.Errorf("failed to add file_ids field: %w", err)
+		}
 	}
 
-	requestBodyBytes, err := json.Marshal(requestBodyMap)
-	if err != nil {
-		return nil, fmt.Errorf("failed to marshal request body: %w", err)
+	// 关闭写入器以设置结束边界
+	if err := writer.Close(); err != nil {
+		return nil, fmt.Errorf("failed to close writer: %w", err)
 	}
 
 	// 创建 HTTP 请求
-	req, err := http.NewRequest("POST", url, bytes.NewBuffer(requestBodyBytes))
+	req, err := http.NewRequest("POST", url, &requestBody)
 	if err != nil {
 		return nil, fmt.Errorf("failed to create HTTP request: %w", err)
 	}
 
 	// 设置必要的头部
-	req.Header.Set("Content-Type", "application/json")
+	req.Header.Set("Content-Type", writer.FormDataContentType())
 	req.Header.Set("Authorization", "Bearer "+os.Getenv("STEPFUN_API_KEY"))
 
 	// 发送请求
@@ -55,7 +62,7 @@ func uploadFileToStepFunWithRetrieval(vectorStoreID string, fileIDs []string) (*
 	}
 
 	// 解析响应 JSON
-	var uploadResp models.UploadResponse
+	var uploadResp UploadResponse
 	err = json.NewDecoder(resp.Body).Decode(&uploadResp)
 	if err != nil {
 		return nil, fmt.Errorf("failed to decode response JSON: %w", err)

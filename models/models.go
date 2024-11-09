@@ -15,8 +15,9 @@ type DatabaseInterface interface {
 	UpdateKnowledgeBase(id, displayName, description, tags string) error
 	//InsertUploadedFile(fileID, fileName, filePath, fileType, fileDescription string) error
 	GetUploadedFileByID(fileID string) (*UploadedFile, error)
-	GetUploadedFileByFileNameSizeUsername(fileName, username string, fileSize int64) (*UploadedFile, error)
+	GetUploadedFileByFileNameSizeUsername(fileName, username string, fileSize int64) ([]*UploadedFile, error)
 	UpdateUploadedFileStatus(fileID, status string) error
+	UpdateFilesStatus(fileID, status string) error
 	InsertFile(id, vectorStoreID string, usageBytes int, fileID, status, purpose string) error
 	Query(query string, args ...interface{}) (*sql.Rows, error)
 	Close() error

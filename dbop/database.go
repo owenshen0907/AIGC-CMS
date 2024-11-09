@@ -270,17 +270,28 @@ func (d *Database) GetUploadedFileByID(fileID string) (*models.UploadedFile, err
 }
 
 // GetUploadedFileByFileNameSizeUsername 查询用户是否上传了重复的文件，如果是则直接返回，无需存醋。
-func (d *Database) GetUploadedFileByFileNameSizeUsername(Filename, UserName string, FileSize int64) (*models.UploadedFile, error) {
+func (d *Database) GetUploadedFileByFileNameSizeUsername(Filename, UserName string, FileSize int64) ([]*models.UploadedFile, error) {
 	query := "SELECT uf.file_id, uf.file_name, uf.file_path,uf.file_type,COALESCE(f.vector_store_id, ''),COALESCE(f.id, ''),COALESCE(f.purpose, ''),COALESCE(f.status, '') FROM uploaded_files uf LEFT JOIN files f ON uf.file_id = f.file_id WHERE uf.file_name = ? AND uf.file_size = ? AND uf.username = ?"
-	row := d.db.QueryRow(query, Filename, FileSize, UserName)
-	var uf models.UploadedFile
-	if err := row.Scan(&uf.FileID, &uf.Filename, &uf.FilePath, &uf.FileType, &uf.StepVectorID, &uf.StepFileID, &uf.StepFilePurpose, &uf.StepFileStatus); err != nil {
-		if err == sql.ErrNoRows {
-			return nil, nil // 未找到记录
-		}
+	rows, err := d.db.Query(query, Filename, FileSize, UserName)
+	if err != nil {
 		return nil, err
 	}
-	return &uf, nil
+	defer rows.Close()
+
+	var uploadedFiles []*models.UploadedFile
+	for rows.Next() {
+		var uf models.UploadedFile
+		if err := rows.Scan(&uf.FileID, &uf.Filename, &uf.FilePath, &uf.FileType, &uf.StepVectorID, &uf.StepFileID, &uf.StepFilePurpose, &uf.StepFileStatus); err != nil {
+			return nil, err
+		}
+		uploadedFiles = append(uploadedFiles, &uf)
+	}
+
+	if err := rows.Err(); err != nil {
+		return nil, err
+	}
+
+	return uploadedFiles, nil
 }
 
 // UpdateUploadedFileStatus 更新上传的文件状态status 状态：默认NULL，failed-上传到知识库处理失败，-completed已处理。success-知识库已向量化完成
@@ -288,7 +299,17 @@ func (d *Database) UpdateUploadedFileStatus(fileID, status string) error {
 	query := "UPDATE uploaded_files SET status = ? WHERE file_id = ?"
 	_, err := d.db.Exec(query, status, fileID)
 	if err != nil {
-		return fmt.Errorf("failed to update file status: %w", err)
+		return fmt.Errorf("无法更新upload_files的状态: %w", err)
+	}
+	return nil
+}
+
+// UpdateUploadedFileStatus 更新上传的文件状态status 状态：默认NULL，failed-上传到知识库处理失败，-completed已处理。success-知识库已向量化完成
+func (d *Database) UpdateFilesStatus(fileID, status string) error {
+	query := "UPDATE files SET status = ? WHERE file_id = ?"
+	_, err := d.db.Exec(query, status, fileID)
+	if err != nil {
+		return fmt.Errorf("无法更新files的状态: %w", err)
 	}
 	return nil
 }
