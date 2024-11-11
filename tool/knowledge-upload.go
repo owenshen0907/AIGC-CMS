@@ -77,12 +77,14 @@ func HandleUploadFile(c *gin.Context, db *dbop.Database) {
 		//判断是否为文件，如果是再进行下一步，否则直接，跳过。（图片视频等无需解析或retrieval）
 		if isTextFile(header.Filename) {
 			stepFileStatus := ""
+			fileStepFileID := ""
 			// 检查每个文件的 purpose 是否为 "retrieval"
 			//var retrievals []RetrievalFileInfo
 			for _, file := range uploadedFile {
 				if file.StepFilePurpose == "retrieval" && file.StepVectorID == vectorStoreID {
 					stepFileStatus = file.StepFileStatus
-					fmt.Println("再知识库下匹配到了同意图的文件")
+					fileStepFileID = file.StepFileID
+					fmt.Println("在知识库下匹配到了同意图的文件")
 				}
 			}
 			//此文件已经在知识库下，并解析完成，跳过上传
@@ -96,6 +98,19 @@ func HandleUploadFile(c *gin.Context, db *dbop.Database) {
 			if stepFileStatus == "processing" {
 				c.JSON(http.StatusOK, gin.H{
 					"status": "此文件已经在知识库下，在解析中，请在页面点击【更新状态】查询最新的解析状态",
+				})
+				return
+			}
+			//此文件已经在知识库下，但为跟知识库进行绑定，执行向量化动作
+			if stepFileStatus == "uploaded" {
+				_, err = BindFilesToVectorStore(vectorStoreID, fileStepFileID)
+				if err != nil {
+					logrus.Errorf("绑定文件到向量库报错: %v", err)
+					c.JSON(http.StatusBadRequest, gin.H{"error": "绑定文件到向量库报错"})
+					return
+				}
+				c.JSON(http.StatusOK, gin.H{
+					"status": "此文件此前已经在知识库下，但未绑定知识库，现已进行绑定，请点击【更新状态】查询最新的解析状态",
 				})
 				return
 			}
@@ -211,8 +226,8 @@ func handleExistingFile(uploadedFile *models.UploadedFile, vectorStoreID, upload
 				return
 			}
 			//再绑定文件到知识库。确保文件进行向量化
-			fileIDs := []string{uploadedFile.StepFileID}
-			_, err = BindFilesToVectorStore(vectorStoreID, fileIDs)
+			//fileIDs := []string{uploadedFile.StepFileID}
+			_, err = BindFilesToVectorStore(vectorStoreID, uploadedFile.StepFileID)
 			if err != nil {
 				logrus.Errorf("绑定文件到知识库报错 %v", err)
 				c.JSON(http.StatusInternalServerError, gin.H{"error": "绑定文件到知识库报错"})
@@ -307,7 +322,14 @@ func processNewFileUpload(
 		c.JSON(http.StatusInternalServerError, gin.H{"error": "无法存储文件信息"})
 		return err
 	}
-	//判断是否是聊天窗口上传的文件
+	// 提交事务
+	err = db.CommitTransaction(tx)
+	if err != nil {
+		logrus.Errorf("提交事务时出错: %v", err)
+		c.JSON(http.StatusInternalServerError, gin.H{"error": "数据库提交错误"})
+		return err
+	}
+	//事务外进行API调用，判断是否是聊天窗口上传的文件
 	//----是聊天框的话，就直接返回文件id和路径即可
 	if vectorStoreID == "local" {
 		c.JSON(http.StatusOK, gin.H{
@@ -333,8 +355,8 @@ func processNewFileUpload(
 		return nil
 	}
 	//再绑定文件到知识库。确保文件进行向量化
-	fileIDs := []string{uploadResp.ID}
-	_, err = BindFilesToVectorStore(vectorStoreID, fileIDs)
+	//fileIDs := []string{uploadResp.ID}
+	_, err = BindFilesToVectorStore(vectorStoreID, uploadResp.ID)
 	if err != nil {
 		logrus.Errorf("绑定文件到知识库报错 %v", err)
 		c.JSON(http.StatusInternalServerError, gin.H{"error": "绑定文件到知识库报错"})

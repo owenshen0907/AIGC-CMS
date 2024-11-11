@@ -117,13 +117,21 @@ func (d *Database) createTables() error {
 	if err != nil {
 		return fmt.Errorf("failed to create table vector_stores: %w", err)
 	}
+	//// 添加索引
+	//addVectorStoresIndexes := `
+	//CREATE INDEX IF NOT EXISTS idx_name ON vector_stores (name);
+	//`
+	//_, err = d.db.Exec(addVectorStoresIndexes)
+	//if err != nil {
+	//	return fmt.Errorf("failed to add indexes for vector_stores: %w", err)
+	//}
 
 	createUploadFilesTable := `
 	CREATE TABLE IF NOT EXISTS uploaded_files (
 		file_id VARCHAR(255) PRIMARY KEY,           -- 文件ID
 		file_name VARCHAR(255) NOT NULL,            -- 文件名
 		file_path VARCHAR(512) NOT NULL,            -- 存储路径
-		file_type VARCHAR(50) NOT NULL,             -- 文件类型
+		file_type VARCHAR(100) NOT NULL,             -- 文件类型
 	    file_size INT NOT NULL, 
 		file_description TEXT,                      -- 文件描述
 		upload_time TIMESTAMP DEFAULT CURRENT_TIMESTAMP, -- 上传时间
@@ -135,19 +143,28 @@ func (d *Database) createTables() error {
 	if err != nil {
 		return fmt.Errorf("failed to create table files: %w", err)
 	}
+	//// 添加索引
+	//addUploadedFilesIndexes := `
+	//CREATE INDEX IF NOT EXISTS idx_file_name_size_username ON uploaded_files (file_name, file_size, username);
+	//`
+	//_, err = d.db.Exec(addUploadedFilesIndexes)
+	//if err != nil {
+	//	return fmt.Errorf("failed to add indexes for uploaded_files: %w", err)
+	//}
 
-	createFileKnowledgeRelationsTable := `
-	CREATE TABLE IF NOT EXISTS fileKnowledgeRelations (
-    id INT AUTO_INCREMENT PRIMARY KEY,              -- 自动生成的自增主键
-    file_id VARCHAR(255) NOT NULL,              -- 文件ID
-    knowledge_base_id VARCHAR(255) NOT NULL,    -- 知识库ID
-   CONSTRAINT fk_file_knowledge_file FOREIGN KEY (file_id) REFERENCES uploaded_files(file_id) ON DELETE CASCADE,
-    CONSTRAINT fk_file_knowledge_vector_store FOREIGN KEY (knowledge_base_id) REFERENCES vector_stores(id) ON DELETE CASCADE
-)`
-	_, err = d.db.Exec(createFileKnowledgeRelationsTable)
-	if err != nil {
-		return fmt.Errorf("failed to create table files: %w", err)
-	}
+	//	createFileKnowledgeRelationsTable := `
+	//	CREATE TABLE IF NOT EXISTS fileKnowledgeRelations (
+	//    id INT AUTO_INCREMENT PRIMARY KEY,              -- 自动生成的自增主键
+	//    file_id VARCHAR(255) NOT NULL,              -- 文件ID
+	//    knowledge_base_id VARCHAR(255) NOT NULL,    -- 知识库ID
+	//   CONSTRAINT fk_file_knowledge_file FOREIGN KEY (file_id) REFERENCES uploaded_files(file_id) ON DELETE CASCADE,
+	//    CONSTRAINT fk_file_knowledge_vector_store FOREIGN KEY (knowledge_base_id) REFERENCES vector_stores(id) ON DELETE CASCADE
+	//)`
+	//	_, err = d.db.Exec(createFileKnowledgeRelationsTable)
+	//	if err != nil {
+	//		return fmt.Errorf("failed to create table files: %w", err)
+	//	}
+
 	createFilesTable := `
 	CREATE TABLE IF NOT EXISTS files (
 		id VARCHAR(255) PRIMARY KEY,           -- 主键ID
@@ -157,13 +174,34 @@ func (d *Database) createTables() error {
 		file_id VARCHAR(255),                  -- 与文件关联的ID
 	    purpose VARCHAR(255) DEFAULT NULL,
 		status VARCHAR(50) NOT NULL DEFAULT 'processing', -- 状态字段：处理中的状态
-		FOREIGN KEY (file_id) REFERENCES uploaded_files(file_id) ON DELETE SET NULL, -- 外键关联 uploaded_files
-		FOREIGN KEY (vector_store_id) REFERENCES vector_stores(id) ON DELETE CASCADE -- 外键关联 vector_stores
+		FOREIGN KEY (file_id) REFERENCES uploaded_files(file_id) ON DELETE SET NULL -- 外键关联 uploaded_files
 	)`
 	_, err = d.db.Exec(createFilesTable)
 	if err != nil {
 		return fmt.Errorf("failed to create table files: %w", err)
 	}
+	//// 添加索引
+	//addFilesIndexes1 := `
+	//CREATE INDEX IF NOT EXISTS idx_file_id ON files (file_id);
+	//`
+	//_, err = d.db.Exec(addFilesIndexes1)
+	//if err != nil {
+	//	return fmt.Errorf("failed to add indexes for files: %w", err)
+	//}
+	//addFilesIndexes2 := `
+	//CREATE INDEX IF NOT EXISTS idx_vector_store_id ON files (vector_store_id);
+	//`
+	//_, err = d.db.Exec(addFilesIndexes2)
+	//if err != nil {
+	//	return fmt.Errorf("failed to add indexes for files: %w", err)
+	//}
+	//addFilesIndexes3 := `
+	//CREATE INDEX IF NOT EXISTS idx_purpose_status ON files (purpose, status);
+	//`
+	//_, err = d.db.Exec(addFilesIndexes3)
+	//if err != nil {
+	//	return fmt.Errorf("failed to add indexes for files: %w", err)
+	//}
 
 	return nil
 }
