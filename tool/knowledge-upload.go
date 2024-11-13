@@ -248,28 +248,29 @@ func processNewFileUpload(
 	header *multipart.FileHeader,
 	uploadDir, userName, vectorStoreID, fileDescription string,
 	fileSize int64,
-) error {
+) (err error) {
 	currentDate := time.Now().Format("2006-01-02")
-	//跟目录/用户名/日期
 	targetDir := filepath.Join(uploadDir, userName, currentDate)
+
 	// 创建上传目录
-	if err := os.MkdirAll(targetDir, os.ModePerm); err != nil {
+	if err = os.MkdirAll(targetDir, os.ModePerm); err != nil {
 		logrus.Errorf("创建上传目录失败: %v", err)
 		c.JSON(http.StatusInternalServerError, gin.H{"error": "无法创建上传目录"})
-		return err
+		return
 	}
 
 	// 确保文件名安全
 	fileName := filepath.Base(header.Filename)
 	filePath := filepath.Join(targetDir, fileName)
 	fmt.Printf("filePath:%v\n", filePath)
+
 	// 计算相对文件路径
 	relativeFilePath, err := filepath.Rel(uploadDir, filePath)
 	fmt.Printf("relativeFilePath:%v\n", relativeFilePath)
 	if err != nil {
 		logrus.Errorf("计算相对文件路径时出错: %v", err)
 		c.JSON(http.StatusInternalServerError, gin.H{"error": "路径处理错误"})
-		return err
+		return
 	}
 	file_web_host := os.Getenv("FILE_WEB_HOST")
 	file_web_path := fmt.Sprintf("%s%s", file_web_host, relativeFilePath)
@@ -279,7 +280,7 @@ func processNewFileUpload(
 	if err != nil {
 		logrus.Errorf("创建文件失败: %v", err)
 		c.JSON(http.StatusInternalServerError, gin.H{"error": "创建文件失败"})
-		return err
+		return
 	}
 	defer out.Close()
 
@@ -287,31 +288,34 @@ func processNewFileUpload(
 	if _, err = io.Copy(out, file); err != nil {
 		logrus.Errorf("写入文件到磁盘失败: %v", err)
 		c.JSON(http.StatusInternalServerError, gin.H{"error": "写入文件到磁盘失败"})
-		return err
+		return
 	}
+
 	// 生成文件ID和类型
 	fileID := uuid.New().String()
 	fileType := header.Header.Get("Content-Type")
 
-	// 开始数据库事务
+	// 开始数据库事务，只处理必要的数据库操作
 	tx, err := db.BeginTransaction()
 	if err != nil {
 		logrus.WithError(err).Error("启动事务时出错")
 		c.JSON(http.StatusInternalServerError, gin.H{"error": "数据库错误"})
-		return err
+		return
 	}
+
 	// 确保事务在函数结束时正确处理
 	defer func() {
 		if p := recover(); p != nil {
 			tx.Rollback()
 			logrus.Errorf("捕获到 panic: %v", p)
-			// 注意：在 defer 中调用 c.JSON 可能导致响应冲突
+			err = fmt.Errorf("panic: %v", p)
 		} else if err != nil {
 			tx.Rollback()
 		} else {
-			if commitErr := db.CommitTransaction(tx); commitErr != nil {
+			commitErr := db.CommitTransaction(tx)
+			if commitErr != nil {
 				logrus.WithError(commitErr).Error("提交事务时出错")
-				// 同上，避免在 defer 中调用 c.JSON
+				err = commitErr
 			}
 		}
 	}()
@@ -320,59 +324,87 @@ func processNewFileUpload(
 	if err = db.InsertUploadedFileTx(tx, fileID, fileName, relativeFilePath, fileType, fileDescription, userName, fileSize); err != nil {
 		logrus.Errorf("将上传文件记录插入数据库时出错: %v", err)
 		c.JSON(http.StatusInternalServerError, gin.H{"error": "无法存储文件信息"})
-		return err
+		return
 	}
+
 	// 提交事务
 	err = db.CommitTransaction(tx)
 	if err != nil {
 		logrus.Errorf("提交事务时出错: %v", err)
 		c.JSON(http.StatusInternalServerError, gin.H{"error": "数据库提交错误"})
-		return err
+		return
 	}
-	//事务外进行API调用，判断是否是聊天窗口上传的文件
-	//----是聊天框的话，就直接返回文件id和路径即可
+
+	// 根据 vectorStoreID 处理不同逻辑，外部 API 调用移出事务之外
 	if vectorStoreID == "local" {
 		c.JSON(http.StatusOK, gin.H{
 			"file_id":       fileID,
 			"status":        "文件已上传",
 			"file_web_path": file_web_path,
 		})
-		return nil
+		return
 	}
-	//----知识库的话，则直接用doc parser上传文件,然后关联知识库(无需判断是否为文件，从知识库上传的只有文件)
-	//调用doc parser上传文件
+
+	// 调用外部 API 上传文件到 StepFun
 	uploadResp, err := UploadFileToStepFunWithExtract(filePath, fileName, "retrieval")
 	if err != nil {
 		logrus.Errorf("上传文件到stepfun报错 %v", err)
 		c.JSON(http.StatusInternalServerError, gin.H{"error": "上传文件到stepfun报错"})
-		return nil
+		return
 	}
-	// 更新数据库中的 files 表，存储 API 返回的文件信息，增加 fileID
+
+	// 插入 files 表的数据，这里可以使用新的事务
+	tx, err = db.BeginTransaction()
+	if err != nil {
+		logrus.WithError(err).Error("启动事务时出错")
+		c.JSON(http.StatusInternalServerError, gin.H{"error": "数据库错误"})
+		return
+	}
+
+	defer func() {
+		if p := recover(); p != nil {
+			tx.Rollback()
+			logrus.Errorf("捕获到 panic: %v", p)
+			err = fmt.Errorf("panic: %v", p)
+		} else if err != nil {
+			tx.Rollback()
+		} else {
+			commitErr := db.CommitTransaction(tx)
+			if commitErr != nil {
+				logrus.WithError(commitErr).Error("提交事务时出错")
+				err = commitErr
+			}
+		}
+	}()
+
+	// 插入 files 表
 	err = db.InsertFile(uploadResp.ID, vectorStoreID, uploadResp.Bytes, fileID, "uploaded", "retrieval")
 	if err != nil {
 		logrus.Errorf("插入files表，retrieval的文件数据 %v", err)
 		c.JSON(http.StatusInternalServerError, gin.H{"error": "插入files表，retrieval的文件数据报错"})
-		return nil
+		return
 	}
-	//再绑定文件到知识库。确保文件进行向量化
-	//fileIDs := []string{uploadResp.ID}
+
+	// 绑定文件到知识库
 	_, err = BindFilesToVectorStore(vectorStoreID, uploadResp.ID)
 	if err != nil {
 		logrus.Errorf("绑定文件到知识库报错 %v", err)
 		c.JSON(http.StatusInternalServerError, gin.H{"error": "绑定文件到知识库报错"})
-		return nil
+		return
 	}
-	// 更新数据库中的 files 表，状态为processing
+
+	// 更新 files 状态为 processing
 	err = db.UpdateFilesStatus(fileID, "processing")
 	if err != nil {
 		logrus.Errorf("更新files状态为processing %v", err)
 		c.JSON(http.StatusInternalServerError, gin.H{"error": "更新files状态为processing报错"})
-		return nil
+		return
 	}
+
 	c.JSON(http.StatusOK, gin.H{
 		"status": "文件绑定到知识库，正常向量化中，可以在知识库点击获取向量化状态，获取向量化进度",
 	})
-	return nil
+	return
 }
 
 // 判断是否为文本文件的函数

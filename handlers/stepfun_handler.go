@@ -301,32 +301,32 @@ func getModelName(apiKey string, messages []models.StepFunMessage, fileType, per
 				}
 			}
 			// 使用flash计算的tokenCount初步判断是否可以使用 step-1-128k
-			if tokenCount <= 80000 {
+			if tokenCount <= 100000 {
 				//确认基本符号后再精确计算tokens
 				tokenCount, err = countTokens(apiKey, messages, "step-1-128k")
 				if err != nil {
 					return "", fmt.Errorf("failed to count tokens with step-1-128k: %w", err)
 				}
 				//最终判断是否可用step-1-128k
-				if tokenCount <= 80000 {
+				if tokenCount <= 100000 {
 					return "step-1-128k", nil
 				}
 			}
 			// 使用flash计算的tokenCount初步判断是否可以使用 step-1-256k
-			if tokenCount <= 180000 {
+			if tokenCount <= 220000 {
 				//确认基本符号后再精确计算tokens
 				tokenCount, err = countTokens(apiKey, messages, "step-1-256k")
 				if err != nil {
 					return "", fmt.Errorf("failed to count tokens with step-1-256k: %w", err)
 				}
 				//最终判断是否可用step-1-256k
-				if tokenCount <= 180000 {
+				if tokenCount <= 220000 {
 					return "step-1-256k", nil
 				}
 			}
 
 		}
-		return "", fmt.Errorf("文本会话会话补全，token count %d  查过了设定的180K的上限", tokenCount)
+		return "", fmt.Errorf("文本会话会话补全，token count %d  超过了设定的220K的上限", tokenCount)
 	}
 }
 
@@ -389,7 +389,6 @@ func processUploadedFiles(db *dbop.Database, payload *models.RequestPayload, api
 			logrus.Printf("文件 ID %s 已存在于已解析过，直接取历史stepfun的记录即可", fileID)
 			// 将 VectorStoreID 添加到 payload 的 VectorFileIds 中
 			payload.VectorFileIds = append(payload.VectorFileIds, fileRecord.StepFileID)
-			return nil
 		}
 		//将文件根目录，文件路径拼接起来
 		filePath := fmt.Sprintf("%s/%s", os.Getenv("FILE_PATH"), fileRecord.FilePath)
