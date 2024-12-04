@@ -2,13 +2,11 @@
 package middleware
 
 import (
+	"fmt"
+	"github.com/gin-gonic/gin"
 	"github.com/golang-jwt/jwt/v5"
 	"net/http"
 	"os"
-	// "strings"
-	"fmt"
-
-	"github.com/gin-gonic/gin"
 )
 
 func JWTMiddleware() gin.HandlerFunc {

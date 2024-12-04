@@ -41,7 +41,7 @@ func HandleChatMessagesChatGpt(db *dbop.Database) gin.HandlerFunc {
 			c.JSON(http.StatusInternalServerError, gin.H{"error": "Server error"})
 			return
 		}
-		logrus.Printf("StepFun 请求报文: %s", reqBodyBytes)
+		logrus.Printf("请求报文: %s", reqBodyBytes)
 
 		apiKey := os.Getenv("OPENAI_API_KEY")
 		if apiKey == "" {
@@ -49,7 +49,7 @@ func HandleChatMessagesChatGpt(db *dbop.Database) gin.HandlerFunc {
 			c.JSON(http.StatusInternalServerError, gin.H{"error": "Server configuration error"})
 			return
 		}
-
+		//如果为高级，或者system_prompt为空，不实用system_prompt
 		// 系统消息
 		systemMessage := models.StepFunMessage{
 			Role:    "system",
@@ -57,6 +57,8 @@ func HandleChatMessagesChatGpt(db *dbop.Database) gin.HandlerFunc {
 		}
 
 		var userMessage models.StepFunMessage
+
+		// 判断是否为图片消息
 
 		if payload.FileType == "img" && len(payload.FileIDs) > 0 {
 			// 处理图片消息
@@ -223,190 +225,6 @@ func HandleChatMessagesChatGpt(db *dbop.Database) gin.HandlerFunc {
 	}
 }
 
-// getModelName 根据 FileType 和消息内容选择合适的模型
-//func getModelName(apiKey string, messages []models.StepFunMessage, fileType, PerformanceLevel string) (string, error) {
-//	//有图片的话不用判断技术模式
-//	if fileType == "img" {
-//		// 尝试使用 step-1v-8k
-//		tokenCount, err := countTokens(apiKey, messages, "step-1v-8k")
-//		if err != nil {
-//			return "", fmt.Errorf("failed to count tokens with step-1v-8k: %w", err)
-//		}
-//		if tokenCount <= 5000 {
-//			return "step-1v-8k", nil
-//		} else if tokenCount > 25000 {
-//			return "", fmt.Errorf("多摸分析，token count %d 超过了系统设定的step-1v-32k最大25K的输入限制", tokenCount)
-//		}
-//		// 尝试使用 step-1v-32k
-//		tokenCount, err = countTokens(apiKey, messages, "step-1v-32k")
-//		if err != nil {
-//			return "", fmt.Errorf("failed to count tokens with step-1v-32k: %w", err)
-//		}
-//		if tokenCount <= 25000 {
-//			return "step-1v-32k", nil
-//		}
-//		return "", fmt.Errorf("多摸分析，token count %d 超过了系统设定的step-1v-32k最大25K的输入限制", tokenCount)
-//	} else {
-//		tokenCount, err := countTokens(apiKey, messages, "step-1-flash")
-//		if err != nil {
-//			return "", fmt.Errorf("failed to count tokens with step-1-flash: %w", err)
-//		}
-//		// 极速模式优先判断是否可以使用 step-1-flash
-//		if PerformanceLevel == "fast" && tokenCount <= 10000 {
-//			// 尝试使用 step-1-flash
-//			return "step-1-flash", nil
-//
-//		}
-//		// 高级模式优先判断是否可以使用 step-2-16k
-//		if PerformanceLevel == "advanced" && tokenCount <= 12000 {
-//			tokenCount, err = countTokens(apiKey, messages, "step-2-16k")
-//			if err != nil {
-//				return "", fmt.Errorf("failed to count tokens with step-1v-32k: %w", err)
-//			}
-//			if tokenCount <= 12000 {
-//				return "step-2-16k", nil
-//			}
-//		}
-//		// 均衡模式优先判断是否可以使用 step-1-8k
-//		if PerformanceLevel == "balanced" {
-//			// 使用flash计算的tokenCount初步判断是否可以使用 step-1-8k
-//			if tokenCount <= 6000 {
-//				//确认基本符号后再精确计算tokens
-//				tokenCount, err = countTokens(apiKey, messages, "step-1-8k")
-//				if err != nil {
-//					return "", fmt.Errorf("failed to count tokens with step-1-8k: %w", err)
-//				}
-//				//最终判断是否可用step-1-8k
-//				if tokenCount <= 6000 {
-//					return "step-1-8k", nil
-//				}
-//			}
-//			// 使用flash计算的tokenCount初步判断是否可以使用 step-1-32k
-//			if tokenCount <= 25000 {
-//				//确认基本符号后再精确计算tokens
-//				tokenCount, err = countTokens(apiKey, messages, "step-1-32k")
-//				if err != nil {
-//					return "", fmt.Errorf("failed to count tokens with step-1-32k: %w", err)
-//				}
-//				//最终判断是否可用step-1-32k
-//				if tokenCount <= 25000 {
-//					return "step-1-32k", nil
-//				}
-//			}
-//			// 使用flash计算的tokenCount初步判断是否可以使用 step-1-128k
-//			if tokenCount <= 80000 {
-//				//确认基本符号后再精确计算tokens
-//				tokenCount, err = countTokens(apiKey, messages, "step-1-128k")
-//				if err != nil {
-//					return "", fmt.Errorf("failed to count tokens with step-1-128k: %w", err)
-//				}
-//				//最终判断是否可用step-1-128k
-//				if tokenCount <= 80000 {
-//					return "step-1-128k", nil
-//				}
-//			}
-//			// 使用flash计算的tokenCount初步判断是否可以使用 step-1-256k
-//			if tokenCount <= 180000 {
-//				//确认基本符号后再精确计算tokens
-//				tokenCount, err = countTokens(apiKey, messages, "step-1-256k")
-//				if err != nil {
-//					return "", fmt.Errorf("failed to count tokens with step-1-256k: %w", err)
-//				}
-//				//最终判断是否可用step-1-256k
-//				if tokenCount <= 180000 {
-//					return "step-1-256k", nil
-//				}
-//			}
-//
-//		}
-//		return "", fmt.Errorf("文本会话会话补全，token count %d  查过了设定的180K的上限", tokenCount)
-//	}
-//}
-
-// countTokens 通过调用 StepFun 的 Token 计数 API 计算消息的 Token 数量
-// 现在接收一个额外的参数 model，用于指定使用哪个模型来计数 tokens
-//func countTokens(apiKey string, messages []models.StepFunMessage, model string) (int, error) {
-//	// 定义请求负载
-//	requestPayload := models.TokenCountRequest{
-//		Model:    model, // 指定模型
-//		Messages: messages,
-//	}
-//
-//	// 编码为 JSON
-//	reqBodyBytes, err := json.Marshal(requestPayload)
-//	if err != nil {
-//		return 0, fmt.Errorf("failed to marshal token count request: %w", err)
-//	}
-//
-//	// 设置请求头
-//	headers := map[string]string{
-//		"Authorization": fmt.Sprintf("Bearer %s", apiKey),
-//		"Content-Type":  "application/json",
-//	}
-//
-//	// 使用 SendStepFunRequest 发送请求
-//	resp, err := SendStepFunRequest("POST", "https://api.stepfun.com/v1/token/count", headers, bytes.NewBuffer(reqBodyBytes))
-//	if err != nil {
-//		return 0, fmt.Errorf("failed to send token count request: %w", err)
-//	}
-//	defer resp.Body.Close()
-//
-//	// 检查响应状态
-//	if resp.StatusCode != http.StatusOK {
-//		// 读取错误信息
-//		bodyBytes, _ := ioutil.ReadAll(resp.Body)
-//		return 0, fmt.Errorf("token count API error: %s", string(bodyBytes))
-//	}
-//
-//	// 解码响应
-//	var tokenCountResp models.TokenCountResponse
-//	err = json.NewDecoder(resp.Body).Decode(&tokenCountResp)
-//	if err != nil {
-//		return 0, fmt.Errorf("failed to decode token count response: %w", err)
-//	}
-//	fmt.Printf("Model: %s", model)
-//	fmt.Printf(";Token count: %d\n", tokenCountResp.Data.TotalTokens)
-//
-//	return tokenCountResp.Data.TotalTokens, nil
-//}
-//
-//func loadFileContent(c *gin.Context, VectorFileId, apiKey string) string {
-//	fileContentURL := fmt.Sprintf("https://api.stepfun.com/v1/files/%s/content", VectorFileId)
-//	req, err := http.NewRequest("GET", fileContentURL, nil)
-//	if err != nil {
-//		logrus.Printf("Error creating file content request: %v", err)
-//		c.JSON(http.StatusInternalServerError, gin.H{"error": "Server error"})
-//		return ""
-//	}
-//	req.Header.Set("Authorization", fmt.Sprintf("Bearer %s", apiKey))
-//	// Send the request
-//	client := &http.Client{}
-//	resp, err := client.Do(req)
-//	if err != nil {
-//		logrus.Printf("Error sending file content request: %v", err)
-//		c.JSON(http.StatusInternalServerError, gin.H{"error": "Failed to retrieve file content"})
-//		return ""
-//	}
-//	defer resp.Body.Close()
-//
-//	// Check response status
-//	if resp.StatusCode != http.StatusOK {
-//		logrus.Printf("Failed to retrieve file content, status code: %d", resp.StatusCode)
-//		c.JSON(http.StatusInternalServerError, gin.H{"error": "Failed to retrieve file content"})
-//		return ""
-//	}
-//
-//	// Read the response body
-//	fileContentBytes, err := ioutil.ReadAll(resp.Body)
-//	if err != nil {
-//		logrus.Printf("Error reading file content response: %v", err)
-//		c.JSON(http.StatusInternalServerError, gin.H{"error": "Failed to read file content"})
-//		return ""
-//	}
-//	// Store the file content
-//	return string(fileContentBytes)
-//}
-
 // processImageMessages 处理图片消息，通过读取和编码图片文件来构建消息内容。
 func processImageMessages(db *dbop.Database, payload models.RequestPayload) (models.StepFunMessage, error) {
 	var content []models.StepFunMessageContent
@@ -462,81 +280,3 @@ func processImageMessages(db *dbop.Database, payload models.RequestPayload) (mod
 		Content: content,
 	}, nil
 }
-
-// processUploadedFiles 处理 FileType 为 "file" 且提供了 FileIDs 的文件上传逻辑。
-// 它包括从数据库检索文件记录、上传文件到 StepFun、更新文件状态，以及将 VectorFileId 添加到 payload 中。
-//func processUploadedFiles(db *dbop.Database, payload *models.RequestPayload, apiKey string, c *gin.Context) error {
-//	for _, fileID := range payload.FileIDs {
-//		// 通过 FileID 获取上传的文件记录
-//		fileRecord, err := db.GetUploadedFileByID(fileID)
-//		if err != nil {
-//			logrus.Errorf("从数据库检索文件记录时出错: %v", err)
-//			c.JSON(http.StatusInternalServerError, gin.H{"error": "无法检索文件信息"})
-//			return err
-//		}
-//		if fileRecord == nil {
-//			logrus.Printf("未找到 FileID 为 %s 的上传文件", fileID)
-//			c.JSON(http.StatusBadRequest, gin.H{"error": "上传的文件未找到"})
-//			return fmt.Errorf("未找到 FileID 为 %s 的上传文件", fileID)
-//		}
-//
-//		// 将文件上传到 StepFun 并进行提取
-//		uploadResp, err := tool.UploadFileToStepFunWithExtract(fileRecord.FilePath, fileRecord.Filename)
-//		if err != nil {
-//			logrus.Errorf("上传文件到 StepFun 时出错: %v", err)
-//			// 更新文件状态为 "failed"
-//			if updateErr := db.UpdateUploadedFileStatus(fileID, "failed"); updateErr != nil {
-//				logrus.Errorf("更新文件状态为 'failed' 时出错: %v", updateErr)
-//			}
-//			c.JSON(http.StatusInternalServerError, gin.H{"error": "文件上传失败"})
-//			return err
-//		}
-//
-//		// 开始轮询文件状态，每隔1秒查询一次，最多等待15秒
-//		status, err := tool.PollFileStatus(uploadResp.ID, 15*time.Second)
-//		if err != nil {
-//			logrus.Errorf("查询文件解析状态时出错: %v", err)
-//			return err
-//		}
-//		fmt.Printf("文件解析完成，状态: %s\n", status)
-//
-//		// 将上传后的文件信息插入到数据库中
-//		err = db.InsertFile(uploadResp.ID, "local20241015145535", uploadResp.Bytes, fileID, status, "file-extract")
-//		if err != nil {
-//			logrus.Errorf("将文件记录插入数据库时出错: %v", err)
-//			c.JSON(http.StatusInternalServerError, gin.H{"error": "插入文件记录失败"})
-//			return err
-//		}
-//
-//		// 更新文件状态为 "completed"表示上传的文件以及发给大模型结构进行解析
-//		err = db.UpdateUploadedFileStatus(fileID, "completed")
-//		if err != nil {
-//			logrus.Errorf("更新文件状态为 'completed' 时出错: %v", err)
-//			// 不返回错误，因为主流程可能仍需继续
-//		}
-//		//fmt.Print("uploadResp.VectorStoreID", uploadResp.ID)
-//		// 将 VectorStoreID 添加到 payload 的 VectorFileIds 中
-//		payload.VectorFileIds = append(payload.VectorFileIds, uploadResp.ID)
-//	}
-//	return nil
-//}
-
-//// sendStepFunRequest 通用的 HTTP 请求发送函数
-//func SendStepFunRequest(method, url string, headers map[string]string, body *bytes.Buffer) (*http.Response, error) {
-//	client := &http.Client{}
-//	req, err := http.NewRequest(method, url, body)
-//	if err != nil {
-//		return nil, fmt.Errorf("failed to create request: %w", err)
-//	}
-//
-//	for key, value := range headers {
-//		req.Header.Set(key, value)
-//	}
-//
-//	resp, err := client.Do(req)
-//	if err != nil {
-//		return nil, fmt.Errorf("failed to send request: %w", err)
-//	}
-//
-//	return resp, nil
-//}

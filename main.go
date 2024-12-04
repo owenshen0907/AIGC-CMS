@@ -7,6 +7,7 @@ import (
 	"openapi-cms/handlers"
 	"openapi-cms/middleware"
 	"openapi-cms/tool"
+	"openapi-cms/tool/filemanager"
 	"os"
 	"strings"
 
@@ -41,6 +42,10 @@ func main() {
 		logrus.Fatalf("Failed to initialize database: %v", err)
 	}
 	defer db.Close()
+	fileMgr, err := filemanager.NewFileManager()
+	if err != nil {
+		logrus.Fatalf("Failed to initialize FileManager: %v", err)
+	}
 
 	// 初始化 Gin 路由器
 	router := gin.Default()
@@ -60,6 +65,12 @@ func main() {
 	// 定义路由并注入依赖
 	api := router.Group("/api")
 	{
+		files := api.Group("/files")
+		{
+			files.POST("/upload", fileMgr.UploadFile)
+			files.GET("/download/*filename", fileMgr.DownloadFile)
+			files.DELETE("/delete/*filename", fileMgr.DeleteFile)
+		}
 		// 创建向量数据库基础信息，使用闭包传递 dbop
 		api.POST("/create-vector-store", func(c *gin.Context) {
 			handlers.HandleCreateVectorStore(c, db)
@@ -88,6 +99,7 @@ func main() {
 		//})
 		// 新增验证并返回用户名的路由
 		api.GET("/validate-user", handlers.HandleValidateUser(db))
+
 	}
 
 	// 监听端口
