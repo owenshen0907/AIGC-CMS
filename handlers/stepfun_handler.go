@@ -109,11 +109,11 @@ func HandleChatMessagesStepFun(db *dbop.Database) gin.HandlerFunc {
 		}
 
 		stepFunRequest := models.StepFunRequestPayload{
-			Model:          model,
-			Stream:         true,
-			Messages:       messages,
-			ToolChoice:     "auto",
-			ResponseFormat: models.ResponseFormat{Type: "text"}, // 默认值为 "text"
+			Model:      model,
+			Stream:     true,
+			Messages:   messages,
+			ToolChoice: "auto",
+			//ResponseFormat: models.ResponseFormat{Type: "text"}, // 默认值为 "text"
 		}
 
 		// 构建工具列表

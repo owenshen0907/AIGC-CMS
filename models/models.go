@@ -111,7 +111,7 @@ type StepFunRequestPayload struct {
 	N                int              `json:"n,omitempty"`                 //控制模型为每个输入消息生成的响应消息结果条数，默认值为1，最大不限，建议不超过5
 	Stop             string           `json:"stop,omitempty"`              //用于指导模型生成聊天响应过程中，是否遇到stop中的内容，进行生成中断，默认为空
 	FrequencyPenalty float64          `json:"frequency_penalty,omitempty"` //默认为0。介于0.0和1.0之间的数字。值较高会使模型生成某token时，根据其过往在生成文本中出现的频度，进行后续降频惩罚，从而降低模型重复生成相同内容的可能性
-	ResponseFormat   ResponseFormat   `json:"response_format,omitempty"`   //用于指导模型输出特定格式的内容。默认为 {"type":"text"}，表示输出文本。设置为 { "type": "json_object" } 可以开启 JSON Mode，输出可解析的 JSON 结构。
+	//ResponseFormat   ResponseFormat   `json:"response_format,omitempty"`   //用于指导模型输出特定格式的内容。默认为 {"type":"text"}，表示输出文本。设置为 { "type": "json_object" } 可以开启 JSON Mode，输出可解析的 JSON 结构。
 }
 
 // StepFunResponse 定义 StepFun API 的响应结构-创建知识库

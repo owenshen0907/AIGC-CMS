@@ -18,7 +18,7 @@ import (
 	"strings"
 )
 
-// handleChatMessagesStepFun 处理 StepFun 聊天消息的请求
+// handleChatMessagesChatGpt 处理 chatgpt 聊天消息的请求
 func HandleChatMessagesChatGpt(db *dbop.Database) gin.HandlerFunc {
 	return func(c *gin.Context) {
 		var payload models.RequestPayload
@@ -34,6 +34,7 @@ func HandleChatMessagesChatGpt(db *dbop.Database) gin.HandlerFunc {
 			return
 		}
 		fmt.Println("****userName:", userName)
+
 		// 打印收到的请求报文
 		reqBodyBytes, err := json.Marshal(payload)
 		if err != nil {
@@ -49,17 +50,25 @@ func HandleChatMessagesChatGpt(db *dbop.Database) gin.HandlerFunc {
 			c.JSON(http.StatusInternalServerError, gin.H{"error": "Server configuration error"})
 			return
 		}
-		//如果为高级，或者system_prompt为空，不实用system_prompt
-		// 系统消息
-		systemMessage := models.StepFunMessage{
-			Role:    "system",
-			Content: payload.SystemPrompt,
+		apiURL := os.Getenv("OPENAI_API_URL")
+		if apiURL == "" {
+			logrus.Println("OPENAI_API_URL is not set")
+			c.JSON(http.StatusInternalServerError, gin.H{"error": "Server configuration error"})
+			return
+		}
+
+		// 根据 PerformanceLevel 设置 systemMessage
+		var systemMessage models.StepFunMessage
+		if payload.PerformanceLevel == "fast" {
+			systemMessage = models.StepFunMessage{
+				Role:    "system",
+				Content: payload.SystemPrompt,
+			}
 		}
 
 		var userMessage models.StepFunMessage
 
 		// 判断是否为图片消息
-
 		if payload.FileType == "img" && len(payload.FileIDs) > 0 {
 			// 处理图片消息
 			userMessage, err = processImageMessages(db, payload)
@@ -69,7 +78,7 @@ func HandleChatMessagesChatGpt(db *dbop.Database) gin.HandlerFunc {
 				return
 			}
 		} else if payload.FileType == "file" && len(payload.FileIDs) > 0 {
-			// 处理文件消息，把vector_file_id 放到数组里
+			// 处理文件消息，把 vector_file_id 放到数组里
 			err = processUploadedFiles(db, &payload, apiKey, c)
 			if err != nil {
 				// processUploadedFiles 已经处理了响应
@@ -90,18 +99,31 @@ func HandleChatMessagesChatGpt(db *dbop.Database) gin.HandlerFunc {
 		}
 
 		// 构建初始消息列表
-		messages := []models.StepFunMessage{systemMessage}
+		messages := []models.StepFunMessage{}
+
+		// 只有在 PerformanceLevel 为 "fast" 时才添加 systemMessage
+		if payload.PerformanceLevel == "fast" {
+			if systemMessage.Role != "" && systemMessage.Content != "" {
+				messages = append(messages, systemMessage)
+			}
+		}
 
 		// 如果有 conversation_history，则将其添加到消息列表中
 		if len(payload.ConversationHistory) > 0 {
-			messages = append(messages, payload.ConversationHistory...)
+			for _, msg := range payload.ConversationHistory {
+				// 只添加有效的消息（role 和 content 不为空）
+				if msg.Role != "" && msg.Content != "" {
+					messages = append(messages, msg)
+				}
+			}
 		}
 
-		// 最后添加 userMessage
-		messages = append(messages, userMessage)
+		// 最后添加用户消息
+		if userMessage.Role != "" && userMessage.Content != "" {
+			messages = append(messages, userMessage)
+		}
 
 		// 如果前端传了 vector_file_id，那么将文件内容解析并存入 messages 里
-		//fmt.Println("payload.VectorFileIds", payload.VectorFileIds)
 		if len(payload.VectorFileIds) > 0 {
 			insertIndex := 1
 			for _, vectorFileId := range payload.VectorFileIds {
@@ -120,16 +142,23 @@ func HandleChatMessagesChatGpt(db *dbop.Database) gin.HandlerFunc {
 			}
 		}
 
-		model := "gpt-4o-mini"
+		// 根据 PerformanceLevel 设置模型
+		model := "gpt-4"
+		Stream := false
+		if payload.PerformanceLevel == "fast" {
+			model = "gpt-4o-mini"
+			Stream = true
+		} else if payload.PerformanceLevel == "balanced" {
+			model = "o1-preview"
+		} else {
+			model = "o1-pro"
+			Stream = true
+		}
 
 		stepFunRequest := models.StepFunRequestPayload{
 			Model:    model,
-			Stream:   true,
+			Stream:   Stream,
 			Messages: messages,
-			//ToolChoice: "auto",
-			ResponseFormat: models.ResponseFormat{
-				Type: "text", // 设置默认值为 "text"
-			},
 		}
 
 		// 构建工具列表
@@ -148,6 +177,7 @@ func HandleChatMessagesChatGpt(db *dbop.Database) gin.HandlerFunc {
 
 		// 将工具添加到请求中
 		stepFunRequest.Tools = tools
+
 		// 将请求体编码为 JSON
 		stepFunReqBodyBytes, err := json.Marshal(stepFunRequest)
 		if err != nil {
@@ -157,10 +187,11 @@ func HandleChatMessagesChatGpt(db *dbop.Database) gin.HandlerFunc {
 		}
 
 		// 打印发送给 StepFun API 的请求报文
-		//logrus.Printf("StepFun API 请求报文: %s", stepFunReqBodyBytes)
-		fmt.Printf("StepFun API 请求报文: %s", stepFunReqBodyBytes)
+		fmt.Printf("OPENAI API 请求报文: %s", stepFunReqBodyBytes)
+
 		// 创建向 StepFun API 发送的 HTTP 请求
-		stepFunReq, err := http.NewRequest("POST", "https://api.openai.com/v1/chat/completions", bytes.NewBuffer(stepFunReqBodyBytes))
+		url := fmt.Sprintf("%s/chat/completions", apiURL)
+		stepFunReq, err := http.NewRequest("POST", url, bytes.NewBuffer(stepFunReqBodyBytes))
 		if err != nil {
 			logrus.Printf("Error creating request: %v", err)
 			c.JSON(http.StatusInternalServerError, gin.H{"error": "Server error"})
@@ -195,8 +226,13 @@ func HandleChatMessagesChatGpt(db *dbop.Database) gin.HandlerFunc {
 			return
 		}
 
-		// 设置响应头以支持流式传输
-		c.Writer.Header().Set("Content-Type", "text/event-stream")
+		// 设置响应头。如果stream==false则使用application/json，否则使用text/event-stream
+		heard_stream := "text/event-stream"
+		if !Stream {
+			heard_stream = "application/json"
+		}
+		//c.Writer.Header().Set("Content-Type", "application/json")
+		c.Writer.Header().Set("Content-Type", heard_stream)
 		c.Writer.Header().Set("Cache-Control", "no-cache")
 		c.Writer.Header().Set("Connection", "keep-alive")
 
@@ -208,20 +244,16 @@ func HandleChatMessagesChatGpt(db *dbop.Database) gin.HandlerFunc {
 				continue // 跳过空行
 			}
 			// 打印返回的报文
-			logrus.Printf("StepFun 返回报文: %s", line)
-			// 发送数据到前端，确保 JSON 字符串未被转义
-			fmt.Fprintf(c.Writer, "%s\n\n", line)
-			// 刷新缓冲区
+			logrus.Printf("OPENAI 返回报文: %s", line)
+			// 发送数据到前端，确保 JSON 字符串不会被破坏
+			c.Writer.Write([]byte(line + "\n\n"))
 			c.Writer.Flush()
 		}
 
+		// 处理可能发生的扫描错误
 		if err := scanner.Err(); err != nil {
-			logrus.Printf("Error reading response from StepFun API: %v", err)
-			c.JSON(http.StatusInternalServerError, gin.H{"error": "Failed to read StepFun response"})
-			return
+			logrus.Printf("Error scanning response body: %v", err)
 		}
-
-		c.Status(http.StatusOK)
 	}
 }
 
